@@ -1,0 +1,88 @@
+#Questo script prende i VCF SRA per ciascun cromosoma, applica un filtro di profondità DP≥5 sui genotipi e produce per ogni cromosoma un VCF filtrato più tutte le statistiche prima/dopo il filtro.
+
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=120G
+#SBATCH -t 18:00:00
+#SBATCH -A IscrB_VIROME
+#SBATCH -p g100_usr_prod
+#SBATCH -J filtering_chr24_B
+#SBATCH -e filter_chr24.err
+#SBATCH -o filter_chr24.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load autoload samtools
+module load autoload bcftools
+module load autoload vcftools
+
+INDIR="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/0_dividere_vcf"     # dove stanno i chr*_subset_sra.vcf.gz
+OUTBASE="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/1_filtro_dp5"    # radice risultati
+mkdir -p "$OUTBASE"
+
+CHRS=(3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 X Y MT)
+
+for c in "${CHRS[@]}"; do
+  VCF="${INDIR}/chr${c}_subset_sra.vcf.gz"
+  CHR="chr${c}"
+  OUTDIR="${OUTBASE}/${CHR}"              # ← cartella dedicata per questo cromosoma
+  mkdir -p "$OUTDIR"
+
+  if [ ! -f "$VCF" ]; then
+    echo "[SKIP] manca $VCF"
+    continue
+  fi
+
+  # se già presente il risultato finale, salta
+  if [ -f "$OUTDIR/${CHR}.dp5.recode.vcf.gz" ]; then
+    echo "[OK] già presente: $OUTDIR/${CHR}.dp5.recode.vcf.gz"
+    continue
+  fi
+
+  echo "================  $CHR  ================"
+
+  # 0) VCF indicizzato
+  if [ ! -f "${VCF}.csi" ]; then
+    echo "Indexing $VCF..."
+    bcftools index "$VCF"
+  fi
+
+  # 1) estrai il cromosoma (copia controllata, identico al tuo script)
+  echo "Extracting $CHR..."
+  bcftools view -Oz -o "$OUTDIR/${CHR}.vcf.gz" "$VCF"
+  bcftools index "$OUTDIR/${CHR}.vcf.gz"
+
+  # 2) conteggi e stat prima filtri
+  echo "Calculating baseline stats..."
+  bcftools view -H "$OUTDIR/${CHR}.vcf.gz" | wc -l > "$OUTDIR/variants_before.txt"
+  vcftools --gzvcf "$OUTDIR/${CHR}.vcf.gz" --missing-site --out "$OUTDIR/missing_site_before"
+  vcftools --gzvcf "$OUTDIR/${CHR}.vcf.gz" --missing-indv  --out "$OUTDIR/missing_indv_before"
+  bcftools stats "$OUTDIR/${CHR}.vcf.gz" > "$OUTDIR/bcftools_stats_before.txt"
+
+  # 3) filtro DP >= 5 sui genotipi (vcftools mette i non-satisfy a ./.)
+  echo "Applying genotype filter: minDP 5"
+  vcftools --gzvcf "$OUTDIR/${CHR}.vcf.gz" --minDP 5 --recode --recode-INFO-all --out "$OUTDIR/${CHR}.dp5"
+  bcftools view -Oz -o "$OUTDIR/${CHR}.dp5.recode.vcf.gz" "$OUTDIR/${CHR}.dp5.recode.vcf"
+  bcftools index "$OUTDIR/${CHR}.dp5.recode.vcf.gz"
+
+  # 5) conteggi dopo filtri
+  echo "Calculating post-filter stats..."
+  bcftools view -H "$OUTDIR/${CHR}.dp5.recode.vcf.gz" | wc -l > "$OUTDIR/variants_after.txt"
+  vcftools --gzvcf "$OUTDIR/${CHR}.dp5.recode.vcf.gz" --missing-site --out "$OUTDIR/missing_site_after"
+  vcftools --gzvcf "$OUTDIR/${CHR}.dp5.recode.vcf.gz" --missing-indv  --out "$OUTDIR/missing_indv_after"
+  bcftools stats "$OUTDIR/${CHR}.dp5.recode.vcf.gz" > "$OUTDIR/bcftools_stats_after.txt"
+
+  # 6) confronto rapido numerico
+  BEFORE=$(cat "$OUTDIR/variants_before.txt")
+  AFTER=$(cat "$OUTDIR/variants_after.txt")
+  {
+    echo "Variants lost  : $((BEFORE-AFTER))"
+    echo "Variants before: $BEFORE"
+    echo "Variants after : $AFTER"
+  } > "$OUTDIR/summary.txt"
+
+  echo "Done. Outputs in $OUTDIR"
+done
+echo "=== COMPLETATO. Radice risultati: $OUTBASE ==="
