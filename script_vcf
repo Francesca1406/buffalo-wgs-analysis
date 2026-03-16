@@ -1,0 +1,97 @@
+ALL CHR.TXT
+chr1
+chr2
+chr3
+chr4
+chr5
+chr6
+chr7
+chr8
+chr9
+chr10
+chr11
+chr12
+chr13
+chr14
+chr15
+chr16
+chr17
+chr18
+chr19
+chr20
+chr21
+chr22
+chr23
+chr24
+chrX
+chrY
+chrMT
+
+
+
+
+
+
+VCF
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=200G
+#SBATCH --time=24:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name vcf_1
+#SBATCH -p g100_usr_prod
+#SBATCH -e vcf_1.err
+#SBATCH -o vcf_1.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+
+module load profile/bioinf
+module load autoload bcftools
+
+# cartella di lavoro
+WORK_DIR="/g100_scratch/userexternal/fbencive"
+GENOME_REFERENZE="$WORK_DIR/REF.fna"
+OUTPUT_VARIANT="$WORK_DIR/VARIANT_CALLING/CHR_LIST_1"
+
+# Variables
+NCORES=4           # core da passare a runbcftools per bcftools
+NumCore=12         # job paralleli (uno per cromosoma)
+
+echo "############################ crea dir ############################"
+mkdir -p "$OUTPUT_VARIANT"
+
+############ AVVIO bcftools #######################################################
+printf "\n############################ bcftools ################################\n"
+
+file_bam="$WORK_DIR/script_varianti/file_list_final_bam.txt"
+file_chr="$WORK_DIR/script_varianti/chr_list_1.txt"
+
+cat "$file_chr" | parallel --no-notice -j$NumCore "$WORK_DIR/script_varianti/runbcftools.sh" $GENOME_REFERENZE $file_bam {} $NCORES $OUTPUT_VARIANT
+
+
+
+
+
+
+
+
+
+
+
+
+RUN BCFTOOLS
+#!/bin/bash
+GENOME_REFERENZE=$1
+file_bam=$2
+CHR=$3
+NCORES=$4
+OUTPUT_VARIANT=$5
+
+bcftools mpileup -C50 -E -a FORMAT/AD,FORMAT/DP,INFO/AD -f $GENOME_REFERENZE -b $file_bam -r $CHR -Ou --threads $NCORES | bcftools call -Oz -v -m -f GQ,GP --threads $NCORES -o $OUTPUT_VARIANT/"variant_call_"$CHR".vcf.gz"
+
+
+
+
+
