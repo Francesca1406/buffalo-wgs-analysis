@@ -1,0 +1,293 @@
+File SRA
+#!/bin/bash
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=2
+#SBATCH --mem=2G
+#SBATCH --time=4:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name=scarica_river_batch
+#SBATCH -p g100_all_serial
+#SBATCH -e SRA_batch.err
+#SBATCH -o SRA_batch.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load sra
+
+PATH_WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/river"
+
+# elenco SRR da processare
+SRR_LIST=("SRR9208801" "SRR9208802" "SAMEA7098680" "SRR6785557")
+
+# ciclo per ogni accessione
+for INPUT_SRA in "${SRR_LIST[@]}"; do
+    echo ">>> PROCESSING: $INPUT_SRA"
+
+    # cartella di output per ogni SRR
+    PATH_SRA_DIR="$PATH_WORK_DIR/$INPUT_SRA"
+    mkdir -p "$PATH_SRA_DIR"
+
+    # scarica file .sra
+    prefetch -p --max-size 1000000000000 -v "$INPUT_SRA" -O "$PATH_WORK_DIR"
+
+    # estrae in fastq
+    fastq-dump --outdir "$PATH_WORK_DIR" --split-files "$PATH_SRA_DIR/$INPUT_SRA.sra"
+
+    echo ">>> DONE: $INPUT_SRA"
+done
+
+
+
+
+
+
+
+
+
+
+
+
+File FASTQC
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 10
+#SBATCH --mem=50G
+#SBATCH --time=5:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name FASTQC_POOL
+#SBATCH -p g100_usr_prod
+#SBATCH -e FASTQC_POOL.err
+#SBATCH -o FASTQC_POOL.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load autoload fastqc/0.11.9
+
+WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/river"
+INPUT_DIR="$WORK_DIR"
+FASTQ_PRE_TRIMMING_OUTPUT_DIR="$WORK_DIR/fastqc/OUTPUT_POOL"
+
+echo "-------> FastQC"
+mkdir -p $FASTQ_PRE_TRIMMING_OUTPUT_DIR
+fastqc -t 8 -o $FASTQ_PRE_TRIMMING_OUTPUT_DIR $INPUT_DIR/*
+
+
+
+
+
+
+
+
+
+
+
+
+Trimmomatic
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 26
+#SBATCH --mem=200G
+#SBATCH --time=04:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name TRIMMOMATIC_RIVER_SRR
+#SBATCH -p g100_usr_prod
+#SBATCH -e TRIMMOMATIC_RIVER_SRR.err
+#SBATCH -o TRIMMOMATIC_RIVER_SRR.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load autoload fastqc/0.11.9
+module load autoload trimmomatic/0.39
+
+WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/river"
+INPUT_DIR="$WORK_DIR"
+TRIMMOMATIC_OUTPUT_DIR="$WORK_DIR/trimmomatic_output"
+FASTQC_POST_OUTPUT_DIR="$WORK_DIR/fastqc_post_trim"
+ADAPT_FA="$WORK_DIR/fastaWithAdapters.fa"
+NCORES=22
+
+mkdir -p "$TRIMMOMATIC_OUTPUT_DIR"
+mkdir -p "$FASTQC_POST_OUTPUT_DIR"
+
+
+echo "-------> Trimmomatic on .fastq files"
+
+suffix="_1.fastq"
+
+for forward in "$INPUT_DIR"/*"$suffix"; do
+    reverse=${forward/_1/_2}
+    base_string=$(basename "$forward" "$suffix")
+
+    fp=$TRIMMOMATIC_OUTPUT_DIR/${base_string}"_1.trimmed.paired.fastq"
+    fu=$TRIMMOMATIC_OUTPUT_DIR/${base_string}"_1.trimmed.unpaired.fastq"
+    rp=$TRIMMOMATIC_OUTPUT_DIR/${base_string}"_2.trimmed.paired.fastq"
+    ru=$TRIMMOMATIC_OUTPUT_DIR/${base_string}"_2.trimmed.unpaired.fastq"
+
+    java -jar $TRIMMOMATIC_HOME/bin/trimmomatic-0.39.jar PE -threads $NCORES -phred33 \
+        "$forward" "$reverse" \
+        "$fp" "$fu" "$rp" "$ru" \
+        CROP:97 \
+        HEADCROP:10 \
+        ILLUMINACLIP:$ADAPT_FA:2:30:10 \
+        SLIDINGWINDOW:4:30 \
+        TRAILING:30 \
+        MINLEN:36 \
+        AVGQUAL:25
+done
+echo "-------> FastQC on trimmed paired reads"
+fastqc -t 8 -o "$FASTQC_POST_OUTPUT_DIR" "$TRIMMOMATIC_OUTPUT_DIR"/*.trimmed.paired.fastq
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Picard
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=120G
+#SBATCH --time=6:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name=picard_SRR6785557
+#SBATCH -p g100_usr_prod
+#SBATCH -e picard_SRR6785557.err
+#SBATCH -o Picard_SRR6785557.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+set -euo pipefail
+
+module load profile/bioinf
+module load autoload samtools/1.13
+module load autoload picard    # usa il wrapper "picard"
+
+BASE="/g100_scratch/userexternal/fbencive/cartella_0/river"
+SAMPLE="SRR6785557"
+OUT="${BASE}/${SAMPLE}_full"
+
+# Input BAM (come visto dalla tua ls)
+file_bam="${OUT}/${SAMPLE}.sorted.bam"
+[ -s "$file_bam" ] || { echo "[ERROR] Non trovo $file_bam"; exit 2; }
+
+# Output
+file_bam_final="${OUT}/aln_final.bam"
+file_metrics="${OUT}/aln_final.metrics"
+flagstat_out="${OUT}/aln_final.flagstat.txt"
+idxstats_out="${OUT}/aln_final.idxstats.txt"
+stats_out="${OUT}/aln_final.stats.txt"
+
+# Tmp
+TEMP_DIR="${OUT}/tmp"
+mkdir -p "$TEMP_DIR"
+
+echo "[INFO] IN  : $file_bam"
+echo "[INFO] OUT : $file_bam_final"
+
+# Picard MarkDuplicates
+java -jar $PICARD_HOME/bin/picard.jar MarkDuplicates --TMP_DIR  $TEMP_DIR  -INPUT $file_bam -OUTPUT $file_bam_final -METRICS_FILE $file_metrics -REMOVE_DUPLICATES false -VALIDATION_STRINGENCY LENIENT -ASSUME_SORTED true
+ ### REMOVE_DUPLICATES=false ASSUME_SORTED=true
+
+# Index e statistiche
+samtools index -@ 20 "$file_bam_final"
+samtools flagstat "$file_bam_final" > "$flagstat_out"
+samtools idxstats "$file_bam_final" > "$idxstats_out"
+samtools stats "$file_bam_final" > "$stats_out"
+
+echo "[OK] Completato $SAMPLE"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+BWA
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 20                 
+#SBATCH --mem=120
+#SBATCH --time=06:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH -p g100_usr_prod
+#SBATCH -J bwa_align_one
+#SBATCH -o bwa_align_one.out
+#SBATCH -e bwa_align_one.err
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+set -euo pipefail
+
+module load profile/bioinf
+module load autoload bwa/0.7.12
+module load autoload samtools/1.13
+
+WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/river"
+TRIM_DIR="${WORK_DIR}/trimmomatic_output"
+REF="/g100_scratch/userexternal/fbencive/REF.fna"
+
+# === Nome del campione (senza suffissi R1/R2) ===
+SAMPLE="ERR4495078"
+
+# === File di input ===
+R1="${TRIM_DIR}/${SAMPLE}_1.trimmed.paired.fastq.gz"
+R2="${TRIM_DIR}/${SAMPLE}_2.trimmed.paired.fastq.gz"
+
+# Controllo esistenza file
+if [[ ! -f "$R1" || ! -f "$R2" ]]; then
+    echo "[ERRORE] File R1 o R2 mancanti per $SAMPLE"
+    exit 1
+fi
+
+# === Cartella output ===
+OUT="${WORK_DIR}/${SAMPLE}_full"
+mkdir -p "$OUT"
+
+# === File di output ===
+BAM_SORT="${OUT}/${SAMPLE}.sorted.bam"
+STATS="${OUT}/${SAMPLE}.sorted.stats.txt"
+IDXSTATS="${OUT}/${SAMPLE}.sorted.idxstats.txt"
+FLAGSTAT="${OUT}/${SAMPLE}.sorted.flagstat.txt"
+
+# === Allineamento ===
+echo "[INFO] Allineamento $SAMPLE..."
+bwa mem -t 20 "$REF" "$R1" "$R2" \
+    | samtools view -b -h -@ 20 \
+    | samtools sort -@ 20 -o "$BAM_SORT" -
+
+# === Indicizzazione e statistiche ===
+samtools index "$BAM_SORT"
+samtools stats "$BAM_SORT" > "$STATS"
+samtools idxstats "$BAM_SORT" > "$IDXSTATS"
+samtools flagstat "$BAM_SORT" > "$FLAGSTAT"
+
+echo "[FATTO] Allineamento completato per $SAMPLE"
+
+
+
+
+
+
