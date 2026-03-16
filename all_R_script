@@ -1,0 +1,754 @@
+PLOT COMMON/UNIQUE
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+unique_tbl <- tribble(
+  ~CHR,  ~UNIQUE_TOT,
+  "1",   3298683, "2", 3305373, "3", 3043366, "4", 2927901, "5", 3125152,
+  "6",   2007543, "7", 1894058, "8", 1884720, "9", 1831554, "10", 1815684,
+  "11",  1711816, "12", 1722854, "13", 1933933, "14", 1638358, "15", 1566088,
+  "16",  1456933, "17", 1260383, "18", 1447862, "19", 1267889, "20", 1178338,
+  "21",  1007043, "22", 1074417, "23", 956977,  "24", 795273,
+  "X",   2007015, "Y", 125915, "MT", 7497
+)
+common_tbl <- tribble(
+  ~CHR, ~COMMON3,
+  "1", 1225366, "2", 1029161, "3", 912312,  "4", 888185, "5", 701453,
+  "6", 674411,  "7", 705842,  "8", 691299,  "9", 643748, "10", 619823,
+  "11", 537150, "12", 557985, "13", 563264, "14", 442319, "15", 478944,
+  "16", 524932, "17", 415434, "18", 336753, "19", 398479, "20", 378632,
+  "21", 349638, "22", 389849, "23", 292545, "24", 239455, "X", 290637
+)
+df <- unique_tbl %>%
+  left_join(common_tbl, by = "CHR") %>%
+  mutate(COMMON3 = if_else(is.na(COMMON3), 0, COMMON3)) %>%
+  mutate(
+    Unique = UNIQUE_TOT - COMMON3,
+    Common = COMMON3
+  )
+chr_levels <- c(as.character(1:24), "X", "Y", "MT")
+df <- df %>%
+  mutate(CHR = factor(CHR, levels = chr_levels))
+main_df  <- df %>% filter(!CHR %in% c("Y", "MT"))
+small_df <- df %>% filter(CHR %in% c("Y", "MT"))
+
+scale_factor <- max(main_df$UNIQUE_TOT) / max(small_df$UNIQUE_TOT)
+plot_df_main <- main_df %>%
+  select(CHR, Common, Unique) %>%
+  pivot_longer(-CHR, names_to = "Condition", values_to = "N") %>%
+  mutate(Number_SNP_million = N / 1e6)
+plot_df_small <- small_df %>%
+  select(CHR, Common, Unique) %>%
+  pivot_longer(-CHR, names_to = "Condition", values_to = "N") %>%
+  mutate(Number_SNP_million = N * scale_factor / 1e6)
+p <- ggplot() +
+  geom_col(
+    data = plot_df_main,
+    aes(x = CHR, y = Number_SNP_million, fill = Condition),
+    width = 0.8
+  ) +
+  geom_col(
+    data = plot_df_small,
+    aes(x = CHR, y = Number_SNP_million, fill = Condition),
+    width = 0.8
+  ) +
+  geom_vline(xintercept = length(unique(main_df$CHR)) + 0.5,
+             linetype = "dashed") +
+  scale_y_continuous(
+    name = "Number of bi-allelic SNPs (in million)",
+    sec.axis = sec_axis(
+      ~ . / scale_factor,
+      name = "Y and MT (in million)"   # ✅ modificata l’etichetta
+    )
+  ) +
+  scale_fill_manual(values = c("Unique" = "#00C1D4", "Common" = "#F8766D")) +
+  labs(x = "Chromosome") +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 0, hjust = 1),
+    plot.margin = margin(10, 20, 20, 20)
+  )
+ggsave(
+  filename = "~/Desktop/SNP_unique_common_Y_MT_millionScale.png",
+  plot = p,
+  width = 8, height = 5.5, dpi = 600
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+BOXPLOT
+setwd("~/Desktop")
+suppressPackageStartupMessages({
+  library(data.table)
+  library(ggplot2)
+})
+med_lmiss <- rbindlist(lapply(list.files("~/Desktop/subset_MED_callrate",
+                                         pattern="\\.lmiss$", full.names=TRUE),
+                              fread), fill=TRUE)
+riv_lmiss <- rbindlist(lapply(list.files("~/Desktop/subset_RIV_callrate",
+                                         pattern="\\.lmiss$", full.names=TRUE),
+                              fread), fill=TRUE)
+swa_lmiss <- rbindlist(lapply(list.files("~/Desktop/subset_SWA_callrate",
+                                         pattern="\\.lmiss$", full.names=TRUE),
+                              fread), fill=TRUE)
+med_lmiss[, Subset := "MED"]
+riv_lmiss[, Subset := "RIV"]
+swa_lmiss[, Subset := “SWA"]
+
+for (DT in list(med_lmiss, riv_lmiss, swa_lmiss)) {
+  DT[, CR := 1 - F_MISS]
+}
+threshold <- 0.90
+med_pass <- med_lmiss[CR >= threshold]
+
+setkey(med_pass, CHR, POS)
+setkey(riv_lmiss, CHR, POS)
+setkey(swa_lmiss, CHR, POS)
+
+riv_filtered <- riv_lmiss[med_pass, nomatch=0]
+swa_filtered <- swa_lmiss[med_pass, nomatch=0]
+
+combined <- rbindlist(list(med_pass, riv_filtered, swa_filtered),
+                      use.names=TRUE, fill=TRUE)
+badcols <- grep("^i\\.", names(combined), value=TRUE)
+if (length(badcols)) combined[, (badcols) := NULL]
+
+combined <- combined[Subset %in% c("MED","RIV","SWA")]
+combined[, Subset := factor(Subset, levels = c(“MED","RIV","SWA"))]
+
+stats_box <- combined[, .(
+  n = .N,
+  min_CR = min(CR, na.rm=TRUE),
+  Q1     = quantile(CR, 0.25, na.rm=TRUE, type=7),
+  median = quantile(CR, 0.50, na.rm=TRUE, type=7),
+  Q3     = quantile(CR, 0.75, na.rm=TRUE, type=7),
+  max_CR = max(CR, na.rm=TRUE),
+  IQR    = IQR(CR, na.rm=TRUE)
+), by = Subset][order(Subset)]
+
+stats_box[, `:=`(
+  lower_whisker = pmax(min_CR, Q1 - 1.5*IQR),
+  upper_whisker = pmin(max_CR, Q3 + 1.5*IQR)
+)]
+
+print(stats_box)
+fwrite(stats_box[, .(
+  Subset, n,
+  min_CR = round(min_CR,4),
+  Q1 = round(Q1,4),
+  median = round(median,4),
+  Q3 = round(Q3,4),
+  max_CR = round(max_CR,4),
+  lower_whisker = round(lower_whisker,4),
+  upper_whisker = round(upper_whisker,4)
+)], "~/Desktop/CR_boxplot_stats_by_subset.csv")
+
+p <- ggplot(combined, aes(x=Subset, y=CR, fill=Subset)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c(
+    MED = "seagreen3",   # verde
+    RIV = "steelblue",   # blu
+    SWA = "goldenrod1"   # giallo
+  )) +
+  labs(
+    title = paste("Call Rate per SNP with CR ≥", threshold, "in MED"),
+    y = "Call Rate (CR)", x = "Subset"
+  ) +
+  theme_minimal(base_size = 14)
+ggsave(paste0("~/Desktop/boxplot_CR_threshold_", threshold, "_noNA.png"),
+       plot=p, width=8, height=6, dpi=600)
+ggsave(paste0("~/Desktop/boxplot_CR_threshold_", threshold, "_noNA.pdf"),
+       plot=p, width=8, height=6)
+
+
+ISTOGRAMMA CALLRATE  MED
+setwd("~/Desktop/subset_MED_callrate")
+getwd()
+list.files(pattern = "\\.lmiss$")  # controllo
+
+need <- c("data.table","ggplot2")
+to_install <- need[!(need %in% rownames(installed.packages()))]
+if (length(to_install)) install.packages(to_install)
+library(data.table)
+library(ggplot2)
+
+IN_DIR <- getwd()
+files <- list.files(IN_DIR, pattern="^subset_MED_chr.*\\.lmiss$", full.names=TRUE)
+if (length(files) == 0) files <- list.files(IN_DIR, pattern="\\.lmiss$", full.names=TRUE)
+stopifnot(length(files) > 0)
+
+all_med <- rbindlist(lapply(files, fread), fill=TRUE)
+stopifnot("F_MISS" %in% names(all_med))
+all_med[, CR := 1 - F_MISS]
+
+nm <- names(all_med)
+if (!"SNP" %in% nm && "POS" %in% nm) {
+  setnames(all_med, "POS", "SNP")
+}
+if (!"SNP" %in% names(all_med)) {
+  stop("Nel .lmiss non trovo né 'SNP' né 'POS'. Controlla i nomi colonne con names(all_med).")
+}
+
+THR <- 0.90
+BINWIDTH <- 0.05
+
+cr_ok  <- all_med[CR >= THR]
+cr_low <- all_med[CR <  THR]
+
+write.table(cr_ok[,  .(CHR, SNP, N_MISS, F_MISS, CR)],
+            file="~/Desktop/SNP_callrate_ge_90.txt",
+            sep="\t", quote=FALSE, row.names=FALSE)
+
+write.table(cr_low[, .(CHR, SNP, N_MISS, F_MISS, CR)],
+            file="~/Desktop/SNP_callrate_lt_90.txt",
+            sep="\t", quote=FALSE, row.names=FALSE)
+
+cat(sprintf("SNP totali: %d | ≥90%%: %d | <90%%: %d\n",
+            nrow(all_med), nrow(cr_ok), nrow(cr_low)))
+
+p <- ggplot(all_med, aes(x = CR)) +
+  geom_histogram(
+    aes(y = (..count..)/sum(..count..) * 100),
+    binwidth = BINWIDTH,
+    colour = "black",
+    fill = "seagreen3"      # ✅ colore verde
+  ) +
+  geom_vline(xintercept = THR, colour = "red", linetype = "dashed", linewidth = 1.2) +
+  labs(title = "Call rate per SNP",
+       subtitle = "Mediterranean",
+       x = "Call Rate",
+       y = "% of SNPs") +
+  theme_minimal(base_size = 18) +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+print(p)
+pct_lt90 <- mean(all_med$CR < THR, na.rm = TRUE) * 100
+cat(sprintf("SNP con CR < 90%%: %.2f%%\n", pct_lt90))
+ggsave("~/Desktop/MED_callrate_allchromosomes_percent_thr90_bins20.png",
+       p, width = 8, height = 6, dpi = 600)
+ggsave("~/Desktop/MED_callrate_allchromosomes_percent_thr90_bins20.pdf",
+       p, width = 8, height = 6)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+HEATMAP DENSITA’
+options(stringsAsFactors = FALSE, scipen = 999, digits = 15)
+rm(list = ls()); gc()
+IN_DIR   <- "~/Desktop/common_biallelic_snp"     # cartella coi VCF
+PATTERN  <- "commons_.*_biallelic.*\\.vcf(\\.gz)?$"
+CHR_SET  <- c(as.character(1:24), "X", "Y")      # includo X e Y
+WINDOW   <- 1e6                                  # 1 Mbp
+
+need <- c("data.table", "ggplot2", "grid")
+to_install <- need[!(need %in% rownames(installed.packages()))]
+if (length(to_install)) install.packages(to_install)
+library(data.table); library(ggplot2); library(grid)
+
+IN_DIR <- path.expand(IN_DIR)
+if (!dir.exists(IN_DIR)) stop("IN_DIR non esiste: ", IN_DIR)
+vcfs <- list.files(IN_DIR, pattern = PATTERN, full.names = TRUE)
+if (!length(vcfs)) stop("Nessun file trovato in IN_DIR.")
+
+chr_from_name <- function(x) {
+  sub("^.*?(?:chr)?([0-9]{1,2}|2[0-4]|X|Y|MT).*$", "\\1",
+      basename(x), perl = TRUE)
+}
+read_pos <- function(f, chr_label) {
+  cmd <- sprintf("bcftools query -f '%%POS\\n' %s", shQuote(f))
+  dt  <- fread(cmd = cmd, header = FALSE, showProgress = FALSE)
+  setnames(dt, "V1", "Position")
+  dt[, CHR := as.character(chr_label)]
+  dt[]
+}
+lst <- vector("list", length(vcfs))
+for (i in seq_along(vcfs)) {
+  chr <- chr_from_name(vcfs[i])
+  lst[[i]] <- read_pos(vcfs[i], chr)
+}
+snpX <- rbindlist(lst, use.names = TRUE, fill = TRUE)
+
+snpX <- snpX[CHR %in% CHR_SET]
+
+snpX[, Position := as.numeric(Position)]
+snpX <- snpX[is.finite(Position)]
+snpX[, CHR := factor(CHR, levels = CHR_SET)]
+
+if (!nrow(snpX)) stop("Nessun SNP dopo il filtro CHR_SET.")
+
+chr_len <- snpX[, .(max_pos = max(Position, na.rm = TRUE)), by = CHR]
+chr_len[, nbins := ceiling(max_pos / WINDOW)]
+max_len_all <- max(chr_len$max_pos, na.rm = TRUE)
+range_Mb    <- max_len_all / 1e6
+
+all_bins <- chr_len[, {
+  starts <- seq(0, nbins - 1) * WINDOW
+  data.table(
+    bin   = seq_len(nbins),
+    start = starts,
+    end   = pmin(starts + WINDOW, max_pos)
+  )
+}, by = CHR]
+
+snpX[, bin := floor(Position / WINDOW) + 1L]
+counts <- snpX[, .N, by = .(CHR, bin)]
+
+bins_dt <- merge(all_bins, counts, by = c("CHR", "bin"), all.x = TRUE)
+bins_dt[is.na(N), N := 0L]
+bins_dt[, start_Mb := start / 1e6]
+bins_dt[, width_Mb := (end - start) / 1e6]
+
+q <- quantile(bins_dt$N, c(0.01, 0.99), na.rm = TRUE)
+CAP_MIN <- 0L
+CAP_MAX <- max(ceiling(q[2] / 1000) * 1000, 1000L)
+bins_dt[, N_cap := pmin(N, CAP_MAX)]
+
+brks <- pretty(c(CAP_MIN, CAP_MAX), n = 6)
+brks <- brks[brks >= CAP_MIN & brks <= CAP_MAX]
+labs <- sprintf("%.0f", brks)
+
+pal <- colorRampPalette(c(
+  "#00441B","#2A7C3A","#7FC97F",
+  "#FFFFBF","#FDBF6F","#F46D43","#D73027"
+))(length(brks) - 1)
+
+mean_density_per_1Mbp <- mean(bins_dt$N, na.rm = TRUE)
+sd_density_per_1Mbp   <- sd(bins_dt$N, na.rm = TRUE)
+
+cat(sprintf("\nMean genome-wide SNP density: %.2f SNPs per 1 Mbp (±%.2f SD)\n",
+            mean_density_per_1Mbp, sd_density_per_1Mbp))
+
+out_dir <- file.path("~", "Desktop", "DensityHeatmap_1Mbp")
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+fwrite(bins_dt[, .(CHR, bin, start, end, N)],
+       file.path(out_dir, "density_1Mbp_counts.csv"))
+
+x_breaks <- pretty(c(0, range_Mb), n = 7)
+
+png(file.path(out_dir, "heatmap_density_1Mbp.png"),
+    width = 36, height = 10, units = "in", res = 600)
+
+ggplot(bins_dt, aes(x = start_Mb, y = CHR, fill = N_cap)) +
+  geom_tile(aes(width = width_Mb, height = 0.8)) +
+  scale_y_discrete(limits = rev) +
+  scale_x_continuous(
+    expand = expansion(c(0.005, 0.01)),
+    limits = c(0, range_Mb),
+    breaks = x_breaks,
+    labels = function(x) sprintf("%d Mbp", x)
+  ) +
+  scale_fill_gradientn(
+    colors = pal,
+    limits = c(CAP_MIN, CAP_MAX),
+    breaks = brks,
+    labels = labs,
+    guide = guide_colorbar(
+      title     = "SNPs / 1 Mbp",
+      barheight = unit(12, "lines"),
+      barwidth  = unit(1.2, "cm")
+    )
+  ) +
+  labs(
+    title = "Number of SNPs within 1 Mbp windows",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal(base_size = 18) +
+  theme(
+    panel.grid        = element_blank(),
+    
+    axis.text.y       = element_text(size = 16, colour = "black", face = "bold"),
+    axis.text.x       = element_text(size = 18, colour = "black", face = "bold"),
+    plot.title        = element_text(size = 22, face = "bold", colour = "black", hjust = 0),
+
+    legend.position   = "right",
+    legend.title      = element_text(size = 18, face = "bold", colour = "black"),
+    legend.text       = element_text(size = 16, face = "bold", colour = "black"),
+    legend.background = element_rect(fill = "white", colour = NA)
+  )
+dev.off()
+cat("\n========================================\n")
+cat(" Genome-wide SNP density (1 Mbp windows)\n")
+cat("========================================\n")
+cat(sprintf("Mean SNP density: %.2f SNPs per 1 Mbp\n", mean_density_per_1Mbp))
+cat(sprintf("Standard deviation: %.2f SNPs per 1 Mbp\n", sd_density_per_1Mbp))
+cat("========================================\n\n")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+PCA PER TUTTI I CAMPIONI
+# PCA all populations: PC1 vs PC2
+setwd("~/Desktop")
+suppressPackageStartupMessages({
+  library(data.table)
+  library(ggplot2)
+})
+
+BASE <- "pca_allchr_1_24"
+
+if (!file.exists(paste0(BASE, ".eigenvec"))) {
+  stop("File non trovato: ", paste0(BASE, ".eigenvec"))
+}
+if (!file.exists(paste0(BASE, ".eigenval"))) {
+  stop("File non trovato: ", paste0(BASE, ".eigenval"))
+}
+
+# =========================
+# 2) Lettura PCA
+# =========================
+evc <- fread(paste0(BASE, ".eigenvec"), header = FALSE)
+setnames(evc, 1:2, c("FID", "IID"))
+
+pcs <- paste0("PC", seq_len(ncol(evc) - 2))
+setnames(evc, 3:ncol(evc), pcs)
+
+pc_cols <- grep("^PC\\d+$", names(evc), value = TRUE)
+evc[, (pc_cols) := lapply(.SD, as.numeric), .SDcols = pc_cols]
+
+eig <- scan(paste0(BASE, ".eigenval"), quiet = TRUE)
+prop_var <- eig / sum(eig)
+
+pc1_var <- round(100 * prop_var[1], 2)
+pc2_var <- round(100 * prop_var[2], 2)
+
+# =========================
+# 3) Gruppi popolazione
+# =========================
+groups <- list(
+  MED = c(
+    "ERR4495068","ERR4495070","ERR4495071",
+    "102292","102293","102294","99389",
+    "SRR4477882","SRR4477885","SRR4477891","SRR4477892","SRR4477896",
+    "SRR4477897","SRR4477898","SRR4477899",
+    "9L","8L","7L","4L","2L","6L","10L","23L","11L","5L",
+    "20L","12L","24L","16L","13L","17L","18L","14L","19L",
+    "3L","1L","22L","15L","21L",
+    "03A1","04A1","05A1","06A1","07A1","08A1","09A1","10A1"
+  ),
+  RIV = c(
+    "ERR4495078","SRR9208790","SRR9208801","SRR9208802","SRR9208810"
+  ),
+  SWA = c(
+    "SRR9208737","SRR9208746","SRR9208748","SRR9208754","SRR9208767","SRR9208782"
+  )
+)
+get_group <- function(id) {
+  if (id %in% groups$MED) return("MED")
+  if (id %in% groups$RIV) return("RIV")
+  if (id %in% groups$SWA) return("SWA")
+  return(NA_character_)
+}
+evc[, Group := vapply(IID, get_group, FUN.VALUE = character(1))]
+pca_all <- evc[!is.na(Group)]
+
+# Inverti PC1 per avere lo stesso orientamento del plot dell'articolo
+pca_all[, PC1 := -PC1]
+
+# Controllo conteggi
+cat("Campioni MED trovati: ", sum(pca_all$Group == "MED"), "\n")
+cat("Campioni RIV trovati: ", sum(pca_all$Group == "RIV"), "\n")
+cat("Campioni SWA trovati: ", sum(pca_all$Group == "SWA"), "\n")
+cat("Totale campioni plot: ", nrow(pca_all), "\n")
+
+# =========================
+# 4) Colori
+# =========================
+pcols <- c(
+  MED = "forestgreen",
+  RIV = "blue",
+  SWA = "goldenrod"
+)
+
+# =========================
+# 5) Output
+# =========================
+outdir <- "~/Desktop/PCA_allchr_plots"
+dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
+
+# =========================
+# 6) Formatter segno meno Unicode
+# =========================
+minus_formatter <- function(x) {
+  gsub("-", "\u2212", format(x, trim = TRUE))
+}
+
+# =========================
+# 7) Plot PCA all populations
+# =========================
+p12_all <- ggplot(pca_all, aes(x = PC1, y = PC2, color = Group)) +
+  geom_point(size = 3.3, alpha = 0.9) +
+  scale_color_manual(
+    values = pcols,
+    guide = guide_legend(override.aes = list(alpha = 1, size = 4))
+  ) +
+  scale_x_continuous(labels = minus_formatter) +
+  scale_y_continuous(labels = minus_formatter) +
+  labs(
+    x = sprintf("PC1 (%.2f%%)", pc1_var),
+    y = sprintf("PC2 (%.2f%%)", pc2_var)
+  ) +
+  theme_minimal(base_size = 18) +
+  theme(
+    plot.title       = element_blank(),
+    legend.title     = element_blank(),
+    legend.text      = element_text(size = 16),
+    axis.title       = element_text(face = "bold"),
+    axis.text        = element_text(size = 14),
+    panel.grid.minor = element_blank()
+  )
+
+# =========================
+# 8) Salvataggio PNG
+# =========================
+ggsave(
+  filename = file.path(outdir, paste0(BASE, "_PC1_PC2_all_clean.png")),
+  plot = p12_all,
+  width = 8,
+  height = 6,
+  dpi = 600
+)
+cat("\nFile salvato in:\n")
+cat(file.path(outdir, paste0(BASE, "_PC1_PC2_all_clean.png")), "\n")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+PCA ONLY MED
+# PCA MED only: PC1 vs PC2
+setwd("~/Desktop")
+suppressPackageStartupMessages({
+  library(data.table)
+  library(ggplot2)
+})
+
+# =========================
+# 1) File PCA
+# =========================
+BASE <- "pca_MED_only"
+
+if (!file.exists(paste0(BASE, ".eigenvec"))) {
+  stop("File non trovato: ", paste0(BASE, ".eigenvec"))
+}
+if (!file.exists(paste0(BASE, ".eigenval"))) {
+  stop("File non trovato: ", paste0(BASE, ".eigenval"))
+}
+
+# =========================
+# 2) Lettura PCA
+# =========================
+evc <- fread(paste0(BASE, ".eigenvec"), header = FALSE)
+setnames(evc, 1:2, c("FID","IID"))
+
+pcs <- paste0("PC", seq_len(ncol(evc) - 2))
+setnames(evc, 3:ncol(evc), pcs)
+
+pc_cols <- grep("^PC\\d+$", names(evc), value = TRUE)
+evc[, (pc_cols) := lapply(.SD, as.numeric), .SDcols = pc_cols]
+
+eig <- scan(paste0(BASE, ".eigenval"), quiet = TRUE)
+prop_var <- eig / sum(eig)
+pc1_var <- round(100 * prop_var[1], 2)
+pc2_var <- round(100 * prop_var[2], 2)
+
+# =========================
+# 3) Sottogruppi MED
+# =========================
+med_black <- c(
+  "ERR4495068","ERR4495070","ERR4495071",
+  "SRR4477882","SRR4477885","SRR4477891","SRR4477892","SRR4477896",
+  "SRR4477897","SRR4477898","SRR4477899"
+)
+
+med_orange <- c(
+  "9L","8L","7L","4L","2L","6L","10L","23L","11L","5L",
+  "20L","12L","24L","16L","13L","17L","18L","14L","19L",
+  "3L","1L","22L","15L","21L"
+)
+
+med_pink <- c(
+  "03A1","04A1","05A1","06A1","07A1","08A1","09A1","10A1"
+)
+
+evc[, SubGroup := fifelse(IID %in% med_black,  "MED_black",
+                   fifelse(IID %in% med_orange, "MED_orange",
+                   fifelse(IID %in% med_pink,   "MED_pink",
+                           NA_character_)))]
+
+pca_med <- evc[!is.na(SubGroup)]
+pca_med[, PC1 := -PC1]
+pca_med[, PC2 := -PC2]
+cat("Campioni MED_black trovati: ", sum(pca_med$SubGroup == "MED_black"), "\n")
+cat("Campioni MED_orange trovati:", sum(pca_med$SubGroup == "MED_orange"), "\n")
+cat("Campioni MED_pink trovati:  ", sum(pca_med$SubGroup == "MED_pink"), "\n")
+cat("Totale campioni nel plot:   ", nrow(pca_med), "\n")
+
+# =========================
+# 4) Colori
+# =========================
+sg_cols <- c(
+  MED_black  = "black",
+  MED_orange = "orange",
+  MED_pink   = "magenta"
+)
+
+# =========================
+# 5) Output
+# =========================
+outdir <- "~/Desktop/PCA_allchr_plots"
+dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
+
+# =========================
+# 6) Vero segno meno Unicode
+# =========================
+minus_formatter <- function(x) {
+  gsub("-", "\u2212", format(x, trim = TRUE))
+}
+
+# =========================
+# 7) Plot PCA MED only
+# =========================
+p12_med <- ggplot(pca_med, aes(x = PC1, y = PC2, color = SubGroup)) +
+  geom_point(size = 3.3, alpha = 0.9) +
+  scale_color_manual(
+    values = sg_cols,
+    labels = c(
+      MED_black  = "WGS_S1",
+      MED_orange = "WGS_S2",
+      MED_pink   = "WGS_L"
+    ),
+    guide = guide_legend(override.aes = list(alpha = 1, size = 4))
+  ) +
+  scale_x_continuous(labels = minus_formatter) +
+  scale_y_continuous(labels = minus_formatter) +
+  labs(
+    x = "PC1 (7.06%)",
+    y = "PC2 (6.46%)"
+  ) +
+  theme_minimal(base_size = 18) +
+  theme(
+    plot.title       = element_blank(),
+    legend.title     = element_blank(),
+    legend.text      = element_text(size = 16),
+    axis.title       = element_text(face = "bold"),
+    axis.text        = element_text(size = 14),
+    panel.grid.minor = element_blank()
+  )
+
+ggsave(
+  filename = file.path(outdir, paste0(BASE, "_MED_PC1_PC2_clean.png")),
+  plot = p12_med,
+  width = 8,
+  height = 6,
+  dpi = 600
+)
+
+# =========================
+# 8) Tabella varianza spiegata
+# =========================
+scree <- data.table(
+  PC       = seq_along(eig),
+  Eigenval = eig,
+  PropVar  = prop_var,
+  CumVar   = cumsum(prop_var)
+)
+fwrite(
+  scree,
+  file.path(outdir, paste0(BASE, "_explained_variance.csv"))
+)
+# =========================
+# 9) Scree plot PNG
+# =========================
+p_scree <- ggplot(scree[1:min(20, .N)], aes(x = PC, y = PropVar)) +
+  geom_line() +
+  geom_point() +
+  scale_x_continuous(breaks = scree$PC[1:min(20, .N)]) +
+  scale_y_continuous(labels = minus_formatter) +
+  labs(
+    title = "Scree plot (prime 20 componenti)",
+    x = "PC",
+    y = "Varianza spiegata (quota)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+ggsave(
+  filename = file.path(outdir, paste0(BASE, "_scree.png")),
+  plot = p_scree,
+  width = 8,
+  height = 5,
+  dpi = 600
+)
+cat("\nFile salvati in:\n", outdir, "\n")
+cat("PNG PCA:  ", file.path(outdir, paste0(BASE, "_MED_PC1_PC2_clean.png")), "\n")
+cat("CSV var.: ", file.path(outdir, paste0(BASE, "_explained_variance.csv")), "\n")
+cat("PNG scree:", file.path(outdir, paste0(BASE, "_scree.png")), "\n")
+
+
+
+
+
+
+
+
