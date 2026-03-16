@@ -1,0 +1,68 @@
+# conversione a plink 
+plink
+  --allow-extra-chr
+  --allow-no-sex
+  --chr-set 24
+  --double-id
+  --keep-allele-order
+  --nonfounders
+  --out plink_output
+  --recode
+  --vcf output_rename.vcf
+
+
+
+
+# escludere pools
+plink
+  --allow-extra-chr
+  --allow-no-sex
+  --chr-set 24
+  --file plink_output
+  --keep-allele-order
+  --nonfounders
+  --out plink_output_noPool
+  --recode
+  --remove remove.txt
+
+
+
+
+# Escludere SNP, mantenendo solo quelli affidabili (CR>=90 e 0.02<AF<0.98)
+plink
+--allow-extra-chr
+--allow-no-sex
+--chr-set 24
+--extract id_commons.txt
+--file plink_output_noPool
+--keep-allele-order
+--nonfounders
+--out plink_output_noPool_CR_AF
+--recode
+
+
+
+### PCA
+plink
+ --allow-extra-chr
+  --allow-no-sex
+  --chr-set 24
+  --file plink_output_noPool_CR_AF
+  --keep-allele-order
+  --nonfounders
+  --out pca_output
+  --pca
+
+
+
+
+# Distance
+plink
+ --allow-extra-chr
+  --allow-no-sex
+  --chr-set 24
+  --distance
+  --file plink_output_noPool_CR_AF
+  --keep-allele-order
+  --nonfounders
+  --out distance_output
