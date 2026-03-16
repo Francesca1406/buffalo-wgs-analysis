@@ -1,0 +1,97 @@
+Lo script scorre tutti i cromosomi, apre i VCF già unificati dei tre dataset e ne estrae esclusivamente gli SNP biallelici, producendo per ciascun cromosoma un nuovo VCF compresso e indicizzato contenente solo varianti bialleliche ad alta qualità
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=120G
+#SBATCH -t 05:00:00
+#SBATCH -A IscrB_VIROME
+#SBATCH -p g100_usr_prod
+#SBATCH -J biall_commons
+#SBATCH -e biall_commons.err
+#SBATCH -o biall_commons.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load autoload bcftools
+
+IN_BASE="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/5_merge_comuni"
+OUT_BASE="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/6_biallelici"
+
+mkdir -p "$OUT_BASE"
+for CHR in {1..24} X Y MT; do
+  IN_DIR="${IN_BASE}/merge_${CHR}"
+  IN_VCF="${IN_DIR}/commons_${CHR}.vcf.gz"
+  OUT_VCF="${OUT_BASE}/commons_${CHR}_biallelic_snps.vcf.gz"
+
+  if [[ ! -s "$IN_VCF" ]]; then
+    echo "⚠️  Manca: $IN_VCF  (salto chr${CHR})"
+    continue
+  fi
+
+  echo "chr${CHR}: estraggo SNP biallelici..."
+  bcftools view -v snps --min-alleles 2 --max-alleles 2 -Oz -o "$OUT_VCF" "$IN_VCF"
+  bcftools index -t "$OUT_VCF"
+done
+
+
+
+
+
+
+
+Questo script prende, per ogni cromosoma, il VCF contenente gli SNP biallelici comuni tra i dataset e crea un nuovo file che include soltanto i campioni appartenenti al gruppo MED 
+indicati nella lista MED.txt. Dopo aver generato il subset, calcola la percentuale di missingness per sito e per individuo, producendo i file di statistiche associati. 
+Tutti gli output vengono organizzati in cartelle separate per cromosoma. Poi ho fatto lo stesso con ALLRIV, RIV e SWA
+#!/bin/bash
+#SBATCH -J SubsetVCF
+#SBATCH -A IscrB_VIROME
+#SBATCH -p g100_usr_prod
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=120G
+#SBATCH -t 04:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load autoload bcftools
+module load autoload vcftools
+
+IN_BASE="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/6_biallelici"
+OUT_BASE="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/7_subset_MED"
+LIST_DIR="list_samples"     # contiene MED.txt
+GROUP="MED"
+
+mkdir -p "$OUT_BASE"
+for CHR in {1..24} X Y MT; do
+  echo "=== chr${CHR} ==="
+  IN_VCF="${IN_BASE}/commons_${CHR}_biallelic_snps.vcf.gz"
+  OUT_DIR="${OUT_BASE}/chr${CHR}"
+  PREFIX="${OUT_DIR}/subset_${GROUP}"
+
+  mkdir -p "$OUT_DIR"
+
+  if [[ ! -s "$IN_VCF" ]]; then
+    echo "⚠️  Manca VCF: $IN_VCF  (salto chr${CHR})"
+    continue
+  fi
+  if [[ ! -s "${LIST_DIR}/${GROUP}.txt" ]]; then
+    echo "⚠️  Manca lista campioni: ${LIST_DIR}/${GROUP}.txt  (stop)"
+    exit 1
+  fi
+
+  # Step 1: Subset VCF
+  vcftools --gzvcf "$IN_VCF" \
+           --keep "${LIST_DIR}/${GROUP}.txt" \
+           --recode --recode-INFO-all \
+           --out "$PREFIX"
+
+  # Step 2: missing per sito
+  vcftools --vcf "${PREFIX}.recode.vcf" --missing-site --out "$PREFIX"
+
+  # Step 3: missing per individuo
+  vcftools --vcf "${PREFIX}.recode.vcf" --missing-indv --out "$PREFIX"
+echo "✅ Finito chr${CHR} → $OUT_DIR"
+done
+
