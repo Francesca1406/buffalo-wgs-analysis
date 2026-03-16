@@ -1,0 +1,122 @@
+Lo script prende, per ogni cromosoma, il VCF merged (SRA+pool), applica un filtro sulla missingness dei siti con vcftools, comprime e indicizza il VCF filtrato e salva le statistiche prima/dopo (numero varianti, missing per sito/individuo, riepilogo).
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=120G
+#SBATCH -t 6:00:00
+#SBATCH -A IscrB_VIROME
+#SBATCH -p g100_usr_prod
+#SBATCH -J miss_allchr
+#SBATCH -e miss_allchr.err
+#SBATCH -o miss_allchr.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load autoload samtools
+module load autoload bcftools
+module load autoload vcftools
+
+IN_BASE="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/2_merge_sra_pool"
+OUT_BASE="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/3_filtro_miss"
+
+# Loop su tutti i cromosomi
+for CHR in {1..24} X Y MT; do
+  echo "=== Inizio filtro per ${CHR} ==="
+
+  VCF="${IN_BASE}/chr${CHR}_merged.vcf.gz"
+  OUTDIR="${OUT_BASE}/filter_miss_chr${CHR}"
+  mkdir -p "${OUTDIR}"
+
+  # 1) Verifica che il file esista
+  if [[ ! -s "${VCF}" ]]; then
+    echo "⚠️  File mancante: ${VCF} — salto ${CHR}"
+    continue
+  fi
+
+  # 2) Conteggio varianti PRIMA del filtro
+  bcftools view -H "${VCF}" | wc -l > "${OUTDIR}/variants_before.txt"
+
+  # 3) Applica filtro max-missing 0.1
+  echo "Applying site missingness filter (max-missing 0.1)..."
+  vcftools --gzvcf "${VCF}" \
+           --max-missing 0.1 \
+           --recode --recode-INFO-all \
+           --out "${OUTDIR}/chr${CHR}.dp5_maxmiss0.1"
+
+  # 4) Comprimi e indicizza
+  bcftools view "${OUTDIR}/chr${CHR}.dp5_maxmiss0.1.recode.vcf" -Oz -o "${OUTDIR}/chr${CHR}.dp5_maxmiss0.1.recode.vcf.gz"
+  bcftools index "${OUTDIR}/chr${CHR}.dp5_maxmiss0.1.recode.vcf.gz"
+
+  # 5) Conteggio DOPO il filtro + statistiche
+  bcftools view -H "${OUTDIR}/chr${CHR}.dp5_maxmiss0.1.recode.vcf.gz" | wc -l > "${OUTDIR}/variants_after.txt"
+  vcftools --gzvcf "${OUTDIR}/chr${CHR}.dp5_maxmiss0.1.recode.vcf.gz" --missing-site --out "${OUTDIR}/missing_site_after"
+  vcftools --gzvcf "${OUTDIR}/chr${CHR}.dp5_maxmiss0.1.recode.vcf.gz" --missing-indv --out "${OUTDIR}/missing_indv_after"
+  bcftools stats "${OUTDIR}/chr${CHR}.dp5_maxmiss0.1.recode.vcf.gz" > "${OUTDIR}/bcftools_stats_after.txt"
+
+  # 6) Riepilogo numerico
+  BEFORE=$(cat "${OUTDIR}/variants_before.txt")
+  AFTER=$(cat "${OUTDIR}/variants_after.txt")
+  {
+    echo "Variants lost  : $((BEFORE-AFTER))"
+    echo "Variants before: ${BEFORE}"
+    echo "Variants after : ${AFTER}"
+  } > "${OUTDIR}/summary.txt"
+
+  echo "✅ ${CHR} completato. Output in ${OUTDIR}"
+done
+echo "🎯 Tutti i cromosomi processati. File finali in ${OUT_BASE}"
+
+
+
+
+
+
+Questo script prende un VCF di già filtrato per missingness (file .recode.vcf), lo comprime/indicizza e calcola le statistiche post-filtro confrontandole con il numero di varianti “prima”.
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=125G
+#SBATCH --time=05:00:00
+#SBATCH --account=IscrB_VIROME
+#SBATCH -p g100_usr_prod
+#SBATCH --job-name=cnr_chr1
+#SBATCH -e filter_chr1.err
+#SBATCH -o filter_chr1.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=chiara.arcuri@unitus.it
+
+module load profile/bioinf
+module load autoload samtools
+module load autoload bcftools
+module load autoload vcftools
+
+VCF="/g100_scratch/userexternal/carcuri0/analisi_paper/2_merge_sra_pool/chr24_merged.vcf.gz"
+CHR="chr24"
+OUTDIR="filter_miss_${CHR}"
+mkdir -p "$OUTDIR"
+
+# 4) applica max-missing 0.1 (mantieni siti con <=10% missing)
+echo "Applying site missingness filter: max-missing 0.1"
+#vcftools --gzvcf "${VCF}" --max-missing 0.1 --recode --recode-INFO-all --out "$OUTDIR/${CHR}.dp5_maxmiss0.1"
+bcftools view "$OUTDIR/${CHR}.dp5_maxmiss0.1.recode.vcf" -Oz -o "$OUTDIR/${CHR}.dp5_maxmiss0.1.recode.vcf.gz"
+bcftools index "$OUTDIR/${CHR}.dp5_maxmiss0.1.recode.vcf.gz"
+
+# 5) conteggi dopo filtri
+echo "Calculating post-filter stats..."
+bcftools view -H "$OUTDIR/${CHR}.dp5_maxmiss0.1.recode.vcf.gz" | wc -l > "$OUTDIR/variants_after.txt"
+vcftools --gzvcf "$OUTDIR/${CHR}.dp5_maxmiss0.1.recode.vcf.gz" --missing-site --out "$OUTDIR/missing_site_after"
+vcftools --gzvcf "$OUTDIR/${CHR}.dp5_maxmiss0.1.recode.vcf.gz" --missing-indv --out "$OUTDIR/missing_indv_after"
+bcftools stats "$OUTDIR/${CHR}.dp5_maxmiss0.1.recode.vcf.gz" > "$OUTDIR/bcftools_stats_after.txt"
+
+# 6) confronto rapido numerico
+BEFORE=$(cat "$OUTDIR/variants_before.txt")
+AFTER=$(cat "$OUTDIR/variants_after.txt")
+echo "Variants before: $BEFORE"
+echo "Variants after : $AFTER"
+echo "Variants lost  : $((BEFORE-AFTER))" > "$OUTDIR/summary.txt"
+echo "Variants before: $BEFORE" >> "$OUTDIR/summary.txt"
+echo "Variants after: $AFTER" >> "$OUTDIR/summary.txt"
+echo "Done. Outputs in $OUTDIR"
+
+
