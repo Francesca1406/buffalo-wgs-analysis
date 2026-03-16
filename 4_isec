@@ -1,0 +1,227 @@
+Questo script trova le varianti comuni per ogni cromosoma tra il dataset Unitus filtrato e il dataset CNR.
+#!/bin/bash
+#SBATCH -J isec_commons_unitus_cnr
+#SBATCH -A IscrB_VIROME
+#SBATCH -p g100_usr_prod
+#SBATCH -n 8
+#SBATCH --mem=40G
+#SBATCH -t 01:00:00
+#SBATCH --mail-user=bencyfra@gmail.com
+#SBATCH --mail-type=ALL
+
+module load profile/bioinf
+module load autoload bcftools
+BASE_UNITUS="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/3_filtro_miss"
+BASE_CNR="/g100_scratch/userexternal/carcuri0/merge_vcf_new/vcf_cnr/vcf_cnr_renamed/vcf_cnr_normalized"
+
+# cromosomi: 1..24 + X + MT
+for chr in {1..24} X MT; do
+  unitus="${BASE_UNITUS}/filter_miss_chr${chr}/chr${chr}.dp5_maxmiss0.1.recode.vcf.gz"
+  cnr="${BASE_CNR}/CNR.chr.${chr}.norm.vcf.gz"
+
+  outdir="isec_commons_unitus_cnr/chr${chr}"
+  mkdir -p "$outdir"
+
+  echo ">>> chr${chr}"
+  echo "    unitus: $unitus"
+  echo "    cnr   : $cnr"
+
+  # Intersezione tra i due file (presenti in entrambi)
+  bcftools isec -n=2 -c all -p "$outdir" "$unitus" "$cnr"
+
+  # Per 2 input, l'intersezione sta in 0002.vcf
+  if [[ -f "$outdir/0002.vcf" ]]; then
+    mv "$outdir/0002.vcf" "$outdir/unitus_cnr_common_chr${chr}.vcf"
+    bgzip -f "$outdir/unitus_cnr_common_chr${chr}.vcf"
+    bcftools index -f "$outdir/unitus_cnr_common_chr${chr}.vcf.gz"
+    echo "    [OK] $outdir/unitus_cnr_common_chr${chr}.vcf.gz"
+  else
+    echo "    [NO VARIANTS] Nessuna intersezione per chr${chr}"
+  fi
+done
+
+
+
+
+
+
+Lo script trova le varianti del cromosoma X che sono presenti contemporaneamente nei dataset UNITUS, CNR e LONG-READ, e salva tutte le partizioni (uniche e comuni)
+#!/bin/bash
+#SBATCH -J isec
+#SBATCH -A IscrB_VIROME
+#SBATCH -p g100_usr_prod
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=120G
+#SBATCH -t 01:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load autoload bcftools
+
+unitus="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/3_filtro_miss/filter_miss_chrX/chrX.dp5_maxmiss0.1.recode.vcf.gz"
+cnr="/g100_scratch/userexternal/carcuri0/merge_vcf_new/vcf_cnr/vcf_cnr_renamed/vcf_cnr_normalized/CNR.chr.X.norm.vcf.gz"
+long="/g100_scratch/userexternal/carcuri0/merge_vcf_new/vcf_long/chrX.recode.vcf.gz"
+
+bcftools isec -n 3 -p isec_chrX "$unitus" "$cnr" "$long"
+
+
+
+
+
+
+Trova le varianti comuni tra i VCF CNR e LONG per ogni cromosoma (1–24, X) e salva l’intersezione come file compresso indicizzato
+#!/bin/bash
+#SBATCH -J isec_commons_cnr_long_1_24_X
+#SBATCH -A IscrB_VIROME
+#SBATCH -p g100_usr_prod
+#SBATCH -n 20
+#SBATCH --mem=120G
+#SBATCH -t 2:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+#SBATCH -o isec_commons_%j.out
+#SBATCH -e isec_commons_%j.err
+
+set -euo pipefail
+module load profile/bioinf
+module load autoload bcftools
+
+BASE_CNR="/g100_scratch/userexternal/carcuri0/merge_vcf_new/vcf_cnr/vcf_cnr_renamed/vcf_cnr_normalized"
+BASE_LONG="/g100_scratch/userexternal/carcuri0/merge_vcf_new/vcf_long"
+
+# cromosomi: 1..24 + X
+CHRS=({1..24} X)
+
+for chr in "${CHRS[@]}"; do
+  echo ">>> chr${chr}"
+
+  cnr="${BASE_CNR}/CNR.chr.${chr}.norm.vcf.gz"
+  long="${BASE_LONG}/chr${chr}.recode.vcf.gz"
+
+  outdir="isec_commons_cnr_long/chr${chr}"
+  mkdir -p "$outdir"
+
+  echo "    cnr : $cnr"
+  echo "    long: $long"
+
+  # Intersezione (presenti in entrambi i file)
+  bcftools isec -n=2 -c all -p "$outdir" "$cnr" "$long"
+
+  # Con due input, l'intersezione è in 0002.vcf
+  if [[ -f "$outdir/0002.vcf" ]]; then
+    mv "$outdir/0002.vcf" "$outdir/cnr_long_common_chr${chr}.vcf"
+    bgzip -f "$outdir/cnr_long_common_chr${chr}.vcf"
+    bcftools index -f "$outdir/cnr_long_common_chr${chr}.vcf.gz"
+    echo "    [OK] $outdir/cnr_long_common_chr${chr}.vcf.gz"
+  else
+    echo "    [NO VARIANTS] Nessuna intersezione per chr${chr}"
+  fi
+done
+
+
+
+
+
+
+
+Per ogni cromosoma, trova le varianti comuni tra il dataset Unitus filtrato e il dataset Long-read, producendo un VCF con l’intersezione (solo SNP presenti in entrambi)
+#!/bin/bash
+#SBATCH -J isec_commons_unitus_long_1_24_X_Y
+#SBATCH -A IscrB_VIROME
+#SBATCH -p g100_usr_prod
+#SBATCH -n 20
+#SBATCH --mem=120G
+#SBATCH -t 2:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+#SBATCH -o isec_commons_%j.out
+#SBATCH -e isec_commons_%j.err
+
+set -euo pipefail
+
+module load profile/bioinf
+module load autoload bcftools
+
+BASE_UNITUS="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/3_filtro_miss"
+BASE_LONG="/g100_scratch/userexternal/carcuri0/merge_vcf_new/vcf_long"
+
+# Cromosomi: 1..24 + X + Y
+CHRS=({1..24} X Y)
+
+for chr in "${CHRS[@]}"; do
+  echo ">>> chr${chr}"
+
+  unitus="${BASE_UNITUS}/filter_miss_chr${chr}/chr${chr}.dp5_maxmiss0.1.recode.vcf.gz"
+  long="${BASE_LONG}/chr${chr}.recode.vcf.gz"
+
+  outdir="isec_commons_unitus_long/chr${chr}"
+  mkdir -p "$outdir"
+
+  echo "    unitus: $unitus"
+  echo "    long  : $long"
+
+  # Intersezione tra i due file (varianti presenti in entrambi)
+  bcftools isec -n=2 -c all -p "$outdir" "$unitus" "$long"
+
+  # Per 2 input, l’intersezione si trova in 0002.vcf
+  if [[ -f "$outdir/0002.vcf" ]]; then
+    mv "$outdir/0002.vcf" "$outdir/unitus_long_common_chr${chr}.vcf"
+    bgzip -f "$outdir/unitus_long_common_chr${chr}.vcf"
+    bcftools index -f "$outdir/unitus_long_common_chr${chr}.vcf.gz"
+    echo "    [OK] $outdir/unitus_long_common_chr${chr}.vcf.gz"
+  else
+    echo "    [NO VARIANTS] Nessuna intersezione per chr${chr}"
+  fi
+done
+echo ">> Finito. File creati in: isec_commons_unitus_long/chr*/unitus_long_common_chr*.vcf.gz"
+
+
+
+
+
+
+
+
+Identifica, per ogni cromosoma, le varianti uniche di UNITUS, CNR e LONG (presenti in un solo dataset) e le salva in tre VCF distinti
+#!/bin/bash
+#SBATCH -J isec_unique_1_24
+#SBATCH -A IscrB_VIROME
+#SBATCH -p g100_usr_prod
+#SBATCH -n 12
+#SBATCH --mem=120G
+#SBATCH -t 3:00:00
+#SBATCH --mail-user=bencyfra@gmail.com
+#SBATCH --mail-type=ALL
+
+module load profile/bioinf
+module load autoload bcftools
+
+BASE_UNITUS="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/3_filtro_miss"
+BASE_CNR="/g100_scratch/userexternal/carcuri0/merge_vcf_new/vcf_cnr/vcf_cnr_renamed/vcf_cnr_normalized"
+BASE_LONG="/g100_scratch/userexternal/carcuri0/merge_vcf_new/vcf_long"
+
+for chr in {1..24} X; do
+  unitus="${BASE_UNITUS}/filter_miss_chr${chr}/chr${chr}.dp5_maxmiss0.1.recode.vcf.gz"
+  cnr="${BASE_CNR}/CNR.chr.${chr}.norm.vcf.gz"
+  long="${BASE_LONG}/chr${chr}.recode.vcf.gz"
+
+  out="isec_unique_chr${chr}"
+  mkdir -p "$out"
+
+  # UNICHE (presenti in esattamente 1 file)
+  bcftools isec -n=1 -c all -p "$out" "$unitus" "$cnr" "$long"
+
+  # Rinomina + comprimi se esistono
+  [[ -f "$out/0000.vcf" ]] && mv "$out/0000.vcf" "$out/unitus_unique_chr${chr}.vcf"
+  [[ -f "$out/0001.vcf" ]] && mv "$out/0001.vcf" "$out/cnr_unique_chr${chr}.vcf"
+  [[ -f "$out/0002.vcf" ]] && mv "$out/0010.vcf" "$out/long_unique_chr${chr}.vcf"
+
+  for f in "$out"/{unitus,cnr,long}_unique_chr${chr}.vcf; do
+    [[ -f "$f" ]] || continue
+    bgzip -f "$f"
+    bcftools index -f "${f}.gz"
+  done
+  echo "chr${chr} fatto → ${out}/(unitus|cnr|long)_unique_chr${chr}.vcf.gz”
+
