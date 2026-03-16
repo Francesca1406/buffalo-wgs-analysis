@@ -1,0 +1,189 @@
+Lo script estrae dal VCF i valori di B-allele frequency (BAF) per ogni individuo, li salva in tabelle per cromosoma, li unisce in un unico file per ciascun gruppo (MED, RIV, SWA, ALLRIV), 
+calcola la frequenza media dell’allele alternativo per ogni gruppo e infine combina tutte le tabelle delle medie in un unico file finale.
+#!/usr/bin/env python3
+import gzip
+import pandas as pd
+import numpy as np
+import time
+import os
+import glob
+
+# === PERCORSI ===
+BASE = "/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/9_frequenza"
+output_folder = os.path.join(BASE, "output_frq")
+os.makedirs(output_folder, exist_ok=True)
+os.chdir(BASE)
+print("WD:", os.getcwd())
+
+
+# === FUNZIONE PER ESTRARRE BAF ===
+def estrai_baf(infile, outfile):
+    start_time = time.time()
+    opener = gzip.open if infile.endswith('.gz') else open
+    with opener(infile, "rt") as f_in, open(outfile, "w") as f_out:
+        ii = 0
+	animdiz = []  # stessa indentazione di "ii = 0"
+        for line in f_in:
+            cols = line.strip().split('\t')
+            if len(cols) < 10:
+                continue
+            ii += 1
+            if ii == 1:
+                # Header VCF
+                cro, pos, idd, ref, alt, qual, fil, info, form, anims = line.strip().split('\t', 9)
+                anim = anims.split('\t')
+                animdiz = list(anim)
+                f_out.write(f"{cro}\t{pos}\t{ref}\t{alt}\t" + "\t".join(animdiz) + "\n")
+            else:
+                cro = cols[0]
+                pos = cols[1]
+                ref = cols[3]
+                alt = cols[4]
+                genofield = cols[8].split(':')
+                try:
+                    posAD = genofield.index('AD')
+                    posDP = genofield.index('DP')
+                except ValueError:
+                    print(f"Attenzione: campo AD o DP mancante alla riga {ii}")
+                    continue
+                teste = []
+                for gt in range(len(cols) - 9):
+                    genosanimal = cols[gt + 9]
+                    genoanimal = genosanimal.split(':')
+                    if len(genoanimal) <= max(posAD, posDP):
+                        teste.append('NA')
+                        continue
+                    allele = genoanimal[posAD]
+                    if ',' not in allele:
+                        teste.append('NA')
+                        continue
+                    try:
+                        alleleDP = int(genoanimal[posDP])
+                        alleleref = int(allele.split(',')[0])
+                        allelealt = int(allele.split(',')[1])
+                        freqalt = round(allelealt / alleleDP, 4) if alleleDP > 0 else 0
+                        teste.append(str(freqalt))
+                    except:
+                        teste.append('NA')
+                f_out.write(f"{cro}\t{pos}\t{ref}\t{alt}\t" + "\t".join(teste) + "\n")
+    print(f"File {outfile} scritto in {round(time.time() - start_time, 2)} sec")
+
+
+# === FUNZIONE PER CALCOLARE LE MEDIE BAF ===
+def calcola_medie_baf(input_file, groups_dict, output_folder):
+    df = pd.read_csv(input_file, sep='\t', low_memory=False)
+    print(f"Lettura {input_file} completata, shape: {df.shape}")
+
+    # Pulizia & numerico
+    df.replace(['.', ''], np.nan, inplace=True)
+    for col in df.columns[4:]:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    # Medie per gruppo
+    for group_name, sample_cols in groups_dict.items():
+        missing_cols = [c for c in sample_cols if c not in df.columns]
+        if missing_cols:
+            print(f"Attenzione: colonne mancanti per {group_name}: {missing_cols[:5]}{'...' if len(missing_cols)>5 else ''}")
+        present_cols = [c for c in sample_cols if c in df.columns]
+        df[f'Mean_{group_name}'] = df[present_cols].mean(axis=1) if present_cols else np.nan
+
+    # Colonne finali
+    cols_to_save = list(df.columns[:4]) + [c for c in df.columns if c.startswith('Mean_')]
+
+    # Salva
+    base = os.path.basename(input_file).replace('_BAF.txt', '')
+    output_file = os.path.join(output_folder, f"{base}_mean_freq.csv")
+    df[cols_to_save].to_csv(output_file, index=False)
+    print(f"File medie salvato in {output_file}")
+
+
+# === FILE VCF ===
+vcf_files = {
+    'med': 'subset_MED_callrate',
+    'riv': 'subset_RIV_callrate',
+    'riv_all': 'subset_ALLRIV_callrate',
+    'swa': 'subset_SWA_callrate'
+}
+
+
+# === GRUPPI ===
+groups = {
+    'MED': [
+	'ERR4495068', 'ERR4495070', 'ERR4495071',
+        '102292', '102293', '102294', '99389',
+        'SRR4477882', 'SRR4477885', 'SRR4477891', 'SRR4477892', 'SRR4477896',
+        'SRR4477897', 'SRR4477898', 'SRR4477899',
+        '9L', '8L', '7L', '4L', '2L', '6L', '10L', '23L', '11L', '5L',
+        '20L', '12L', '24L', '16L', '13L', '17L', '18L', '14L', '19L',
+        '3L', '1L', '22L', '15L', '21L',
+        '03A1', '04A1', '05A1', '06A1', '07A1', '08A1', '09A1', '10A1'
+    ],
+    'RIV': ['ERR4495078', 'SRR9208790', 'SRR9208801', 'SRR9208802', 'SRR9208810'],
+    'SWA': ['SRR9208737', 'SRR9208746', 'SRR9208748', 'SRR9208754', 'SRR9208767', 'SRR9208782'],
+    'RIV_ALL': [
+        'ERR4495068', 'ERR4495070', 'ERR4495071',
+        '102292', '102293', '102294', '99389',
+        'SRR4477882', 'SRR4477885', 'SRR4477891', 'SRR4477892', 'SRR4477896',
+        'SRR4477897', 'SRR4477898', 'SRR4477899',
+        '9L', '8L', '7L', '4L', '2L', '6L', '10L', '23L', '11L', '5L',
+        '20L', '12L', '24L', '16L', '13L', '17L', '18L', '14L', '19L',
+        '3L', '1L', '22L', '15L', '21L',
+        '03A1', '04A1', '05A1', '06A1', '07A1', '08A1', '09A1', '10A1',
+        'ERR4495078', 'SRR9208790', 'SRR9208801', 'SRR9208802', 'SRR9208810'
+    ]
+}
+
+
+# === CICLO PRINCIPALE PER TUTTI I SUBSET E TUTTI I CROMOSOMI ===
+# === CICLO PRINCIPALE PER TUTTI I SUBSET E TUTTI I CROMOSOMI ===
+for name, folder in vcf_files.items():
+    print(f"\n--- Elaborazione {name} ---")
+    baf_out = os.path.join(output_folder, f"{name}_BAF.txt")
+
+    # cerca tutti i VCF per-cromosoma nella sottocartella
+    pattern = os.path.join(BASE, folder, f"chr*_subset_{folder.split('_')[1].upper()}.recode.vcf")
+    vcfs_chr = sorted(glob.glob(pattern))
+    if not vcfs_chr:
+        print(f"⚠️  Nessun file trovato in {folder}")
+        continue
+
+    print(f"Trovati {len(vcfs_chr)} file per {folder}")
+    partials = []
+
+    for vcf in vcfs_chr:
+        chr_name = os.path.basename(vcf).split('_')[0]
+        out_chr = os.path.join(output_folder, f"{name}_{chr_name}_BAF.txt")
+        print(f"  Estrai BAF: {vcf} → {out_chr}")
+        estrai_baf(vcf, out_chr)
+        partials.append(out_chr)
+
+    # concatena tutti i cromosomi
+    with open(baf_out, "w") as w:
+        for i, f in enumerate(partials):
+            with open(f) as r:
+                for j, line in enumerate(r):
+                    if i > 0 and j == 0:
+                        continue
+                    w.write(line)
+
+    print(f"→ Unito {len(partials)} file in {baf_out}")
+
+    # calcola medie BAF
+    group_key = name.upper() if name != 'riv_all' else 'RIV_ALL'
+    calcola_medie_baf(baf_out, {group_key: groups[group_key]}, output_folder)
+
+
+# === MERGE FINALE DEI FILE DI MEDIE ===
+files = [os.path.join(output_folder, f) for f in os.listdir(output_folder) if f.endswith('_mean_freq.csv')]
+if not files:
+    print("⚠️  Nessun *_mean_freq.csv trovato in", output_folder)
+else:
+    merged_df = pd.read_csv(files[0])
+    print("File base:", files[0])
+    for f in files[1:]:
+        print("→ Aggiungo:", f)
+        df = pd.read_csv(f)
+        merged_df = pd.merge(merged_df, df, on=['#CHROM', 'POS', 'REF', 'ALT'], how='outer')
+    merged_path = os.path.join(output_folder, 'merged_mean_freq_all_groups.csv')
+    merged_df.to_csv(merged_path, index=False)
+    print(f"✅ Merge completato: {merged_path}")
