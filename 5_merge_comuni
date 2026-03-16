@@ -1,0 +1,56 @@
+Questo script prende i file VCF generati dall’intersezione tra i tre dataset (Unitus, CNR e Long-read), li comprime e li indicizza individualmente, e poi li unisce in un unico VCF contenente tutte le varianti comuni ai tre insiemi per il cromosoma selezionato. Il risultato finale è un file “commons” già compresso e indicizzato, pronto per le analisi successive.
+#!/bin/bash
+#SBATCH -J merge_chr1
+#SBATCH -A IscrB_VIROME
+#SBATCH -p g100_usr_prod
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=120G
+#SBATCH -t 01:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+# === Moduli ===
+module load profile/bioinf
+module load autoload bcftools
+
+# === Parametri ===
+CHROM=X  # Cambia questo valore per altri cromosomi
+INPUT_DIR="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/4_isec/isec_chrX"
+OUTPUT_DIR="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/5_merge_comuni/merge_X"
+OUTPUT_PREFIX="${OUTPUT_DIR}/commons_${CHROM}"
+
+mkdir -p "$OUTPUT_DIR"
+
+# === File di input ===
+declare -A FILES=(
+    [unitus]="0000.vcf"
+    [cnr]="0001.vcf"
+    [long]="0002.vcf"
+)
+
+# === Compressione e indicizzazione ===
+for key in "${!FILES[@]}"; do
+    infile="${INPUT_DIR}/${FILES[$key]}"
+    outfile="${OUTPUT_DIR}/${key}_${CHROM}.vcf.gz"
+
+    echo " Compressing $infile → $outfile"
+    bcftools view -Oz -o "$outfile" "$infile"
+
+    echo " Indexing $outfile"
+    bcftools index "$outfile"
+done
+
+# === Merge ===
+echo " Merging VCFs..."
+bcftools merge \
+    -Oz \
+    -o "${OUTPUT_PREFIX}.vcf.gz" \
+    "${OUTPUT_DIR}/unitus_${CHROM}.vcf.gz" \
+    "${OUTPUT_DIR}/cnr_${CHROM}.vcf.gz" \
+    "${OUTPUT_DIR}/long_${CHROM}.vcf.gz"
+
+echo " Indexing merged VCF..."
+bcftools index "${OUTPUT_PREFIX}.vcf.gz"
+echo " Merge completed! Output: ${OUTPUT_PREFIX}.vcf.gz"
+
