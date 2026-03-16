@@ -1,0 +1,4 @@
+#Questo script unisce il VCF filtrato degli SRA con il VCF dei pool, ricostruendo un unico VCF cromosomico completo
+
+bcftools merge "$chr24.dp5.recode.vcf.gz" "$chr24_subset_pool.vcf.gz" -o chr24_merged.vcf.gz -O z
+
