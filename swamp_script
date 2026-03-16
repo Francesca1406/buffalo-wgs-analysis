@@ -1,0 +1,214 @@
+SRA
+#!/bin/bash
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=2
+#SBATCH --mem=2G
+#SBATCH --time=1:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name scarica_file_SRR9208746
+#SBATCH -p g100_all_serial
+#SBATCH -e SRA_scarica_file.err
+#SBATCH -o SRA_scarica_file.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load sra
+PATH_WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/swamp"
+
+INPUT_SRA="SRR9208746"
+
+PATH_SRA_DIR=$PATH_WORK_DIR/$INPUT_SRA
+
+# comando per scaricare i file SRA
+prefetch -p --max-size 1000000000000 -v $INPUT_SRA -O $PATH_WORK_DIR
+
+# estrago il file
+fastq-dump --outdir $PATH_WORK_DIR --split-files $PATH_SRA_DIR/$INPUT_SRA".sra"
+
+
+
+
+
+
+
+
+
+
+
+
+
+FASTQC
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 10
+#SBATCH --mem=50G
+#SBATCH --time=8:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name=FASTQC_POOL
+#SBATCH -p g100_usr_prod
+#SBATCH -e FASTQC_POOL.err
+#SBATCH -o FASTQC_POOL.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load autoload fastqc/0.11.9
+
+WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/swamp"
+INPUT_DIR="$WORK_DIR"
+FASTQC_PRE_TRIMMING_OUTPUT_DIR="$WORK_DIR/fastqc/OUTPUT_POOL"
+
+echo "--------> FastQC"
+mkdir -p $FASTQC_PRE_TRIMMING_OUTPUT_DIR
+fastqc -t 8 -o $FASTQC_PRE_TRIMMING_OUTPUT_DIR $INPUT_DIR/*
+
+
+
+
+
+
+
+
+
+
+
+
+
+TRIMMOMATIC
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 26
+#SBATCH --mem=200G
+#SBATCH --time=5:00:00
+#SBATCH --partition=g100_usr_prod
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name=trimmomatric_SWAMP_SRR
+#SBATCH -o TRIMMOMATIC_SWAMP_SRR.out
+#SBATCH -e TRIMMOMATIC_SWAMP_SRR.err
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=benctra@gmail.com
+
+module load profile/bioinf
+module load autoload fastqc/0.11.9
+module load autoload trimmomatic/0.39
+
+WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/swamp"
+INPUT_DIR="$WORK_DIR"
+TRIMMOMATIC_OUTPUT_DIR="$WORK_DIR/trimmomatic_output"
+FASTQC_POST_OUTPUT_DIR="$WORK_DIR/fastqc_post_trim"
+ADAPT_FA="$WORK_DIR/fastatihAdapters.fa"
+NCORES=22
+
+mkdir -p "$TRIMMOMATIC_OUTPUT_DIR"
+mkdir -p "$FASTQC_POST_OUTPUT_DIR"
+
+################# TRIMMOMATIC (FASTQ) #################
+echo "====== Trimmomatic on .fastq files ======"
+
+suffix="_1.fastq"
+
+for forward in "$INPUT_DIR/"*"$suffix"; do
+    reverse="${forward/_1/_2}"
+    base_string=$(basename "$forward" "$suffix")
+
+    fp="$TRIMMOMATIC_OUTPUT_DIR/${base_string}_1.trimmed.paired.fastq"
+    fu="$TRIMMOMATIC_OUTPUT_DIR/${base_string}_1.trimmed.unpaired.fastq"
+    rp="$TRIMMOMATIC_OUTPUT_DIR/${base_string}_2.trimmed.paired.fastq"
+    ru="$TRIMMOMATIC_OUTPUT_DIR/${base_string}_2.trimmed.unpaired.fastq"
+
+    java -jar $TRIMMOMATIC_HOME/bin/trimmomatic-0.39.jar PE -threads $NCORES -phred33 \
+        "$forward" "$reverse" \
+        "$fp" "$fu" "$rp" "$ru" \
+        ILLUMINACLIP:$ADAPT_FA:2:30:10 \
+        CROP:97 \
+        HEADCROP:10 \
+        SLIDINGWINDOW:4:30 \
+        TRAILING:3 \
+        MINLEN:36 \
+        AVGQUAL:25
+done
+
+################# POST-TRIM FASTQC #################
+echo "====== FastQC on trimmed paired reads ======"
+fastqc -t 8 -o "$FASTQC_POST_OUTPUT_DIR" "$TRIMMOMATIC_OUTPUT_DIR"/*_trimmed.paired.fastq
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+BWA
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=200G
+#SBATCH --time=06:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH -p g100_usr_prod
+#SBATCH -J bwa_align_SRR9208737
+#SBATCH -o bwa_align_SRR9208737.out
+#SBATCH -e bwa_align_SRR9208737.err
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+set -xeuo pipefail
+
+# Moduli
+source /etc/profile.d/modules.sh 2>/dev/null || true
+module purge || true
+module load profile/bioinf
+module load autoload bwa/0.7.12
+module load autoload samtools/1.13
+module list
+
+
+WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/swamp"
+TRIM_DIR="${WORK_DIR}/trimmomatic_output"
+REF="/g100_scratch/userexternal/fbencive/REF.fna"
+
+# Campione
+SAMPLE="SRR9208746"
+
+# Input (NOTA: .fastq, non .gz — se i tuoi file sono .gz cambia l'estensione qui sotto)
+R1="${TRIM_DIR}/${SAMPLE}_1.trimmed.paired.fastq"
+R2="${TRIM_DIR}/${SAMPLE}_2.trimmed.paired.fastq"
+
+# Controlli
+[[ -f "$R1" && -f "$R2" ]] || { echo "[ERRORE] Mancano R1/R2: $R1 / $R2" >&2; exit 2; }
+[[ -f "$REF" ]] || { echo "[ERRORE] Manca REF: $REF" >&2; exit 2; }
+[[ -f "${REF}.fai" ]] || { echo "[ERRORE] Manca ${REF}.fai -> eseguire: samtools faidx $REF" >&2; exit 2; }
+[[ -f "${REF}.bwt" ]] || { echo "[ERRORE] Manca indice BWA (${REF}.bwt ecc.) -> eseguire: bwa index $REF" >&2; exit 2; }
+
+# Output
+OUT="${WORK_DIR}/${SAMPLE}_full"
+mkdir -p "$OUT"
+BAM_SORT="${OUT}/${SAMPLE}.sorted.bam"
+STATS="${OUT}/${SAMPLE}.sorted.stats.txt"
+IDXSTATS="${OUT}/${SAMPLE}.sorted.idxstats.txt"
+FLAGSTAT="${OUT}/${SAMPLE}.sorted.flagstat.txt"
+
+echo "[INFO] R1=$R1"
+echo "[INFO] R2=$R2"
+
+# Allineamento + sort
+bwa mem -t 20 "$REF" "$R1" "$R2" \
+  | samtools view -b -h -@ 20 \
+  | samtools sort -@ 20 -o "$BAM_SORT" -
+
+# Index e stats
+samtools index "$BAM_SORT"
+samtools stats "$BAM_SORT" > "$STATS"
+samtools idxstats "$BAM_SORT" > "$IDXSTATS"
+samtools flagstat "$BAM_SORT" > "$FLAGSTAT"
+
+echo "[FATTO] Allineamento completato per $SAMPLE"
