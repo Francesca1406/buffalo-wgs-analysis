@@ -1,0 +1,90 @@
+#Script di reheader: rinomina i campioni di ogni VCF cromosomico usando la lista old_samples.txt e produce VCF indicizzati con i nuovi nomi
+#!/bin/bash
+#SBATCH -J rename_tuscia
+#SBATCH -A IscrB_VIROME
+#SBATCH -p g100_usr_prod
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=120G
+#SBATCH -t 00:30:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load autoload bcftools
+NAMES="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/0_dividere_vcf/old_samples.txt"
+INDIR="/g100_scratch/userexternal/carcuri0/francesca/bcftools/NEW_VARIANT_CALLING/CHR_LISTS"
+OUTDIR="$INDIR/reheader"
+mkdir -p "$OUTDIR"
+
+n_old=$(bcftools query -l "$INDIR/variant_call_chr1.vcf.gz" | wc -l)
+n_new=$(wc -l < "$NAMES")
+[ "$n_old" -ne "$n_new" ] && echo "ERRORE: $n_old campioni nel VCF, $n_new nomi in old_samples.txt" && exit 1
+for c in {1..24} X Y MT; do
+  in="$INDIR/variant_call_chr${c}.vcf.gz"
+  out="$OUTDIR/variant_call_chr${c}_rename.vcf.gz"
+  if [ -f "$in" ]; then
+    echo ">>> Rinominando chr${c} ..."
+    bcftools reheader -s "$NAMES" -o "$out" "$in" || { echo "FAIL chr${c}"; exit 2; }
+    bcftools index -f --csi "$out"
+  else
+    echo "[Manca] $in"
+  fi
+done
+echo "Fatto. Output: $OUTDIR"
+
+
+
+
+
+#Script di subset: per ogni VCF cromosomico divide i campioni in due file, uno con i campioni pool e uno con tutti gli altri campioni.
+#!/bin/bash
+#SBATCH -J rename_tuscia
+#SBATCH -A IscrB_VIROME
+#SBATCH -p g100_usr_prod
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=120G
+#SBATCH -t 00:30:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load autoload bcftools
+INDIR="/g100_scratch/userexternal/carcuri0/analisi_paper_francesca/0_dividere_vcf"
+POOL="${INDIR}/pool_samples.txt"
+
+# cromosomi da processare
+CHRS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 X Y MT)
+
+for c in "${CHRS[@]}"; do
+  in="${INDIR}/variant_call_chr${c}_rename.vcf.gz"
+  out_pool="${INDIR}/chr${c}_subset_pool.vcf.gz"
+  out_sra="${INDIR}/chr${c}_subset_sra.vcf.gz"
+
+  if [ ! -f "$in" ]; then
+    echo "[SKIP] manca input: $in"
+    continue
+  fi
+
+  # salta se già creati (es. chr1, chr2, chr24)
+  if [ -f "$out_pool" ] && [ -f "$out_sra" ]; then
+    echo "[OK] già presenti: chr${c}"
+    continue
+  fi
+
+  echo ">>> chr${c}: creo subset_pool..."
+  bcftools view -S "$POOL" -Oz -o "$out_pool" --threads 4 "$in" || { echo "FAIL pool chr${c}"; exit 2; }
+  bcftools index -f --csi "$out_pool"
+
+  echo ">>> chr${c}: creo subset_sra (complemento)..."
+  bcftools view -S ^"$POOL" -Oz -o "$out_sra" --threads 4 "$in" || { echo "FAIL sra chr${c}"; exit 3; }
+  bcftools index -f --csi "$out_sra"
+done
+echo “Fatto."
+
+
+#Divide il VCF del cromosoma 24 in due file: uno con quei quattro campioni specifici, e uno con tutti gli altri campioni.
+bcftools view -s 102292,102293,102294,99389 …
+bcftools view -s ^102292,102293,102294,99389 …
+
