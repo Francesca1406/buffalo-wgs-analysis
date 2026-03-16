@@ -1,0 +1,268 @@
+File raw 
+#!/bin/bash
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=2
+#SBATCH --mem=2G
+#SBATCH --time=4:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name=scarica_1_med
+#SBATCH -p g100_all_serial
+#SBATCH -e SRA_batch.err
+#SBATCH -o SRA_batch.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load sra
+
+PATH_WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/mediterranean"
+
+# elenco SRR da processare
+SRR_LIST=("SRR4477885" "SRR4477891" "SRR4477892" "SRR4477896" "SRR4477897")
+
+# ciclo per ogni accessione
+for INPUT_SRA in "${SRR_LIST[@]}"; do
+    echo ">>> PROCESSING: $INPUT_SRA"
+
+    # cartella di output per ogni SRR
+    PATH_SRA_DIR="$PATH_WORK_DIR/$INPUT_SRA"
+    mkdir -p "$PATH_SRA_DIR"
+
+    # scarica file .sra
+    prefetch -p --max-size 1000000000000 -v "$INPUT_SRA" -O "$PATH_WORK_DIR"
+
+    # estrae in fastq
+    fastq-dump --outdir "$PATH_WORK_DIR" --split-files "$PATH_SRA_DIR/$INPUT_SRA.sra"
+
+    echo ">>> DONE: $INPUT_SRA"
+done
+
+
+
+
+
+
+
+
+
+
+
+
+Decompressione FastQ
+#!/bin/bash
+#SBATCH --job-name=decomprimi_fastq
+#SBATCH --output=decomprimi_fastq.out
+#SBATCH --error=decomprimi_fastq.err
+#SBATCH --mem=10G
+#SBATCH --time=2:00:00
+#SBATCH -p g100_all_serial
+
+cd /g100_scratch/userexternal/fbencive/cartella_0/mediterranean
+
+for dir in SAMEA*; do
+  if [ -d "$dir" ]; then
+    for file in "$dir"/*.fastq.gz; do
+      cp "$file" . && gunzip "$(basename "$file")"
+    done
+  fi
+done
+
+
+
+
+
+
+
+
+
+
+
+FASTQC
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 10
+#SBATCH --mem=50G
+#SBATCH --time=6:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name FASTQC_POOL
+#SBATCH -p g100_usr_prod
+#SBATCH -e FASTQC_POOL.err
+#SBATCH -o FASTQC_POOL.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load autoload fastqc/0.11.9
+cd /g100_scratch/userexternal/fbencive/cartella_0/mediterranean
+
+mkdir -p fastqc_results
+fastqc *.fastq -o fastqc_results
+
+
+
+
+
+
+
+
+
+Picard
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 40
+#SBATCH --mem=200G
+#SBATCH --time=08:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name=picard_two.sh
+#SBATCH -p g100_usr_prod
+#SBATCH -e picard_two.err
+#SBATCH -o picard_two.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+set -euo pipefail
+
+module load profile/bioinf
+module load autoload samtools/1.13
+module load autoload picard/2.25.7
+
+BASE="/g100_scratch/userexternal/fbencive/cartella_0/mediterranean"
+SAMPLES=("SRR4477897" "SRR4477898")
+THREADS_EACH=20
+
+run_one() {
+  local SAMPLE="$1"
+  local OUT="${BASE}/${SAMPLE}_full"
+  local file_bam="${OUT}/aln.sorted.bam"
+  local TEMP_DIR="${OUT}/tmp"
+  mkdir -p "$TEMP_DIR"
+
+  # output
+  local file_bam_final="${OUT}/aln_final.bam"
+  local file_metrics="${OUT}/aln_final.metrics"
+  local flagstat_out="${OUT}/aln_final.flagstat.txt"
+  local idxstats_out="${OUT}/aln_final.idxstats.txt"
+  local stats_out="${OUT}/aln_final.stats.txt"
+
+  echo "[${SAMPLE}] INPUT : $file_bam"
+  echo "[${SAMPLE}] OUTPUT: $file_bam_final"
+
+  # Picard MarkDuplicates
+  java -jar $PICARD_HOME/bin/picard.jar MarkDuplicates \
+    --TMP_DIR "$TEMP_DIR" \
+    --INPUT "$file_bam" \
+    --OUTPUT "$file_bam_final" \
+    --METRICS_FILE "$file_metrics" \
+    --REMOVE_DUPLICATES false \
+    --VALIDATION_STRINGENCY LENIENT \
+    --ASSUME_SORTED true
+
+  # indicizzazione
+  samtools index -@ "$THREADS_EACH" "$file_bam_final"
+
+  # statistiche
+  samtools flagstat "$file_bam_final" > "$flagstat_out"
+  samtools idxstats "$file_bam_final" > "$idxstats_out"
+  samtools stats "$file_bam_final" > "$stats_out"
+
+  echo "[${SAMPLE}] DONE."
+}
+# Avvio in parallelo
+run_one "${SAMPLES[0]}" &
+PID1=$!
+run_one "${SAMPLES[1]}" &
+PID2=$!
+
+wait $PID1; R1=$?
+wait $PID2; R2=$?
+if [[ $R1 -ne 0 || $R2 -ne 0 ]]; then
+  echo "[FAIL] almeno un campione fallito." >&2
+  exit 1
+fi
+echo "[OK] entrambi i campioni completati."
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Trimmomatic
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 26
+#SBATCH --mem=200G
+#SBATCH --time=5:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name=TRIMMOMATIC_MEDIT
+#SBATCH -p g100_usr_prod
+#SBATCH -e TRIMMOMATIC_MEDIT.err
+#SBATCH -o TRIMMOMATIC_MEDIT.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+#################### MODULES ####################
+module load profile/bioinf
+module load autoload fastqc/0.11.9
+module load autoload trimmomatic/0.39
+
+#################### PATHS AND VARIABLES ####################
+WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/mediterranean"
+INPUT_DIR="$WORK_DIR"
+TRIMMOMATIC_OUTPUT_DIR="$WORK_DIR/trimmomatic_output"
+FASTQC_POST_OUTPUT_DIR="$WORK_DIR/fastqc_post_trim"
+ADAPT_FA="$WORK_DIR/fastwhtiAdapters.fa"
+NCORES=22
+
+#################### CREATE DIRECTORIES ####################
+mkdir -p "$TRIMMOMATIC_OUTPUT_DIR"
+mkdir -p "$FASTQC_POST_OUTPUT_DIR"
+
+#################### TRIMMOMATIC (FASTQ.GZ) ####################
+suffix="_1.fastq"
+
+for forward in "$INPUT_DIR"/*"$suffix"; do
+    reverse="${forward/_1/_2}"
+    base_string=$(basename "$forward" "$suffix")
+
+    fp="$TRIMMOMATIC_OUTPUT_DIR/${base_string}_1.trimmed.paired.fastq"
+    fu="$TRIMMOMATIC_OUTPUT_DIR/${base_string}_1.trimmed.unpaired.fastq"
+    rp="$TRIMMOMATIC_OUTPUT_DIR/${base_string}_2.trimmed.paired.fastq"
+    ru="$TRIMMOMATIC_OUTPUT_DIR/${base_string}_2.trimmed.unpaired.fastq"
+
+    java -jar $TRIMMOMATIC_HOME/bin/trimmomatic-0.39.jar PE -threads $NCORES -phred33 \
+        "$forward" "$reverse" \
+        "$fp" "$fu" "$rp" "$ru" \
+        ILLUMINACLIP:$ADAPT_FA:2:30:10 \
+        SLIDINGWINDOW:4:30 \
+        TRAILING:30 \
+        MINLEN:40 \
+        AVGQUAL:25
+done
+echo "Eseguo FastQC su trimmed paired reads"
+fastqc -t 8 -o "$FASTQC_POST_OUTPUT_DIR" "$TRIMMOMATIC_OUTPUT_DIR"/*trimmed.paired.fastq
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
