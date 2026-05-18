@@ -1,0 +1,54 @@
+
+Picard
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=120G
+#SBATCH --time=6:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name=picard_SRR6785557
+#SBATCH -p g100_usr_prod
+#SBATCH -e picard_SRR6785557.err
+#SBATCH -o Picard_SRR6785557.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+set -euo pipefail
+
+module load profile/bioinf
+module load autoload samtools/1.13
+module load autoload picard    # usa il wrapper "picard"
+
+BASE="/g100_scratch/userexternal/fbencive/cartella_0/river"
+SAMPLE="SRR6785557"
+OUT="${BASE}/${SAMPLE}_full"
+
+# Input BAM (come visto dalla tua ls)
+file_bam="${OUT}/${SAMPLE}.sorted.bam"
+[ -s "$file_bam" ] || { echo "[ERROR] Non trovo $file_bam"; exit 2; }
+
+# Output
+file_bam_final="${OUT}/aln_final.bam"
+file_metrics="${OUT}/aln_final.metrics"
+flagstat_out="${OUT}/aln_final.flagstat.txt"
+idxstats_out="${OUT}/aln_final.idxstats.txt"
+stats_out="${OUT}/aln_final.stats.txt"
+
+# Tmp
+TEMP_DIR="${OUT}/tmp"
+mkdir -p "$TEMP_DIR"
+
+echo "[INFO] IN  : $file_bam"
+echo "[INFO] OUT : $file_bam_final"
+
+# Picard MarkDuplicates
+java -jar $PICARD_HOME/bin/picard.jar MarkDuplicates --TMP_DIR  $TEMP_DIR  -INPUT $file_bam -OUTPUT $file_bam_final -METRICS_FILE $file_metrics -REMOVE_DUPLICATES false -VALIDATION_STRINGENCY LENIENT -ASSUME_SORTED true
+ ### REMOVE_DUPLICATES=false ASSUME_SORTED=true
+
+# Index e statistiche
+samtools index -@ 20 "$file_bam_final"
+samtools flagstat "$file_bam_final" > "$flagstat_out"
+samtools idxstats "$file_bam_final" > "$idxstats_out"
+samtools stats "$file_bam_final" > "$stats_out"
+
+echo "[OK] Completato $SAMPLE"
