@@ -1,0 +1,26 @@
+File FASTQC
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 10
+#SBATCH --mem=50G
+#SBATCH --time=5:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name FASTQC_POOL
+#SBATCH -p g100_usr_prod
+#SBATCH -e FASTQC_POOL.err
+#SBATCH -o FASTQC_POOL.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load autoload fastqc/0.11.9
+
+WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/river"
+INPUT_DIR="$WORK_DIR"
+FASTQ_PRE_TRIMMING_OUTPUT_DIR="$WORK_DIR/fastqc/OUTPUT_POOL"
+
+echo "-------> FastQC"
+mkdir -p $FASTQ_PRE_TRIMMING_OUTPUT_DIR
+fastqc -t 8 -o $FASTQ_PRE_TRIMMING_OUTPUT_DIR $INPUT_DIR/*
+
+
