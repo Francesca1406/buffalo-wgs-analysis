@@ -1,0 +1,77 @@
+Picard
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 40
+#SBATCH --mem=200G
+#SBATCH --time=08:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name=picard_two.sh
+#SBATCH -p g100_usr_prod
+#SBATCH -e picard_two.err
+#SBATCH -o picard_two.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+set -euo pipefail
+
+module load profile/bioinf
+module load autoload samtools/1.13
+module load autoload picard/2.25.7
+
+BASE="/g100_scratch/userexternal/fbencive/cartella_0/mediterranean"
+SAMPLES=("SRR4477897" "SRR4477898")
+THREADS_EACH=20
+
+run_one() {
+  local SAMPLE="$1"
+  local OUT="${BASE}/${SAMPLE}_full"
+  local file_bam="${OUT}/aln.sorted.bam"
+  local TEMP_DIR="${OUT}/tmp"
+  mkdir -p "$TEMP_DIR"
+
+  # output
+  local file_bam_final="${OUT}/aln_final.bam"
+  local file_metrics="${OUT}/aln_final.metrics"
+  local flagstat_out="${OUT}/aln_final.flagstat.txt"
+  local idxstats_out="${OUT}/aln_final.idxstats.txt"
+  local stats_out="${OUT}/aln_final.stats.txt"
+
+  echo "[${SAMPLE}] INPUT : $file_bam"
+  echo "[${SAMPLE}] OUTPUT: $file_bam_final"
+
+  # Picard MarkDuplicates
+  java -jar $PICARD_HOME/bin/picard.jar MarkDuplicates \
+    --TMP_DIR "$TEMP_DIR" \
+    --INPUT "$file_bam" \
+    --OUTPUT "$file_bam_final" \
+    --METRICS_FILE "$file_metrics" \
+    --REMOVE_DUPLICATES false \
+    --VALIDATION_STRINGENCY LENIENT \
+    --ASSUME_SORTED true
+
+  # indicizzazione
+  samtools index -@ "$THREADS_EACH" "$file_bam_final"
+
+  # statistiche
+  samtools flagstat "$file_bam_final" > "$flagstat_out"
+  samtools idxstats "$file_bam_final" > "$idxstats_out"
+  samtools stats "$file_bam_final" > "$stats_out"
+
+  echo "[${SAMPLE}] DONE."
+}
+# Avvio in parallelo
+run_one "${SAMPLES[0]}" &
+PID1=$!
+run_one "${SAMPLES[1]}" &
+PID2=$!
+
+wait $PID1; R1=$?
+wait $PID2; R2=$?
+if [[ $R1 -ne 0 || $R2 -ne 0 ]]; then
+  echo "[FAIL] almeno un campione fallito." >&2
+  exit 1
+fi
+echo "[OK] entrambi i campioni completati."
+
+
+
