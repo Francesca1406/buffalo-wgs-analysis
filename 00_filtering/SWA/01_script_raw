@@ -1,0 +1,32 @@
+SRA
+#!/bin/bash
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=2
+#SBATCH --mem=2G
+#SBATCH --time=1:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name scarica_file_SRR9208746
+#SBATCH -p g100_all_serial
+#SBATCH -e SRA_scarica_file.err
+#SBATCH -o SRA_scarica_file.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load sra
+PATH_WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/swamp"
+
+INPUT_SRA="SRR9208746"
+
+PATH_SRA_DIR=$PATH_WORK_DIR/$INPUT_SRA
+
+# comando per scaricare i file SRA
+prefetch -p --max-size 1000000000000 -v $INPUT_SRA -O $PATH_WORK_DIR
+
+# estrago il file
+fastq-dump --outdir $PATH_WORK_DIR --split-files $PATH_SRA_DIR/$INPUT_SRA".sra"
+
+
+
+
+
