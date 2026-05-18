@@ -1,0 +1,25 @@
+FASTQC
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 10
+#SBATCH --mem=50G
+#SBATCH --time=6:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name FASTQC_POOL
+#SBATCH -p g100_usr_prod
+#SBATCH -e FASTQC_POOL.err
+#SBATCH -o FASTQC_POOL.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load autoload fastqc/0.11.9
+cd /g100_scratch/userexternal/fbencive/cartella_0/mediterranean
+
+mkdir -p fastqc_results
+fastqc *.fastq -o fastqc_results
+
+
+
+
+
