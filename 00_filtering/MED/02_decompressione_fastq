@@ -1,0 +1,20 @@
+Decompressione FastQ
+#!/bin/bash
+#SBATCH --job-name=decomprimi_fastq
+#SBATCH --output=decomprimi_fastq.out
+#SBATCH --error=decomprimi_fastq.err
+#SBATCH --mem=10G
+#SBATCH --time=2:00:00
+#SBATCH -p g100_all_serial
+
+cd /g100_scratch/userexternal/fbencive/cartella_0/mediterranean
+
+for dir in SAMEA*; do
+  if [ -d "$dir" ]; then
+    for file in "$dir"/*.fastq.gz; do
+      cp "$file" . && gunzip "$(basename "$file")"
+    done
+  fi
+done
+
+
