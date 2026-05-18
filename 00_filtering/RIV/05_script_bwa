@@ -1,0 +1,60 @@
+BWA
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 20                 
+#SBATCH --mem=120
+#SBATCH --time=06:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH -p g100_usr_prod
+#SBATCH -J bwa_align_one
+#SBATCH -o bwa_align_one.out
+#SBATCH -e bwa_align_one.err
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+set -euo pipefail
+
+module load profile/bioinf
+module load autoload bwa/0.7.12
+module load autoload samtools/1.13
+
+WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/river"
+TRIM_DIR="${WORK_DIR}/trimmomatic_output"
+REF="/g100_scratch/userexternal/fbencive/REF.fna"
+
+# === Nome del campione (senza suffissi R1/R2) ===
+SAMPLE="ERR4495078"
+
+# === File di input ===
+R1="${TRIM_DIR}/${SAMPLE}_1.trimmed.paired.fastq.gz"
+R2="${TRIM_DIR}/${SAMPLE}_2.trimmed.paired.fastq.gz"
+
+# Controllo esistenza file
+if [[ ! -f "$R1" || ! -f "$R2" ]]; then
+    echo "[ERRORE] File R1 o R2 mancanti per $SAMPLE"
+    exit 1
+fi
+
+# === Cartella output ===
+OUT="${WORK_DIR}/${SAMPLE}_full"
+mkdir -p "$OUT"
+
+# === File di output ===
+BAM_SORT="${OUT}/${SAMPLE}.sorted.bam"
+STATS="${OUT}/${SAMPLE}.sorted.stats.txt"
+IDXSTATS="${OUT}/${SAMPLE}.sorted.idxstats.txt"
+FLAGSTAT="${OUT}/${SAMPLE}.sorted.flagstat.txt"
+
+# === Allineamento ===
+echo "[INFO] Allineamento $SAMPLE..."
+bwa mem -t 20 "$REF" "$R1" "$R2" \
+    | samtools view -b -h -@ 20 \
+    | samtools sort -@ 20 -o "$BAM_SORT" -
+
+# === Indicizzazione e statistiche ===
+samtools index "$BAM_SORT"
+samtools stats "$BAM_SORT" > "$STATS"
+samtools idxstats "$BAM_SORT" > "$IDXSTATS"
+samtools flagstat "$BAM_SORT" > "$FLAGSTAT"
+
+echo "[FATTO] Allineamento completato per $SAMPLE"
