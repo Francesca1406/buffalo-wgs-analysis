@@ -1,0 +1,65 @@
+BWA
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 20
+#SBATCH --mem=200G
+#SBATCH --time=06:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH -p g100_usr_prod
+#SBATCH -J bwa_align_SRR9208737
+#SBATCH -o bwa_align_SRR9208737.out
+#SBATCH -e bwa_align_SRR9208737.err
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+set -xeuo pipefail
+
+# Moduli
+source /etc/profile.d/modules.sh 2>/dev/null || true
+module purge || true
+module load profile/bioinf
+module load autoload bwa/0.7.12
+module load autoload samtools/1.13
+module list
+
+
+WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/swamp"
+TRIM_DIR="${WORK_DIR}/trimmomatic_output"
+REF="/g100_scratch/userexternal/fbencive/REF.fna"
+
+# Campione
+SAMPLE="SRR9208746"
+
+# Input (NOTA: .fastq, non .gz — se i tuoi file sono .gz cambia l'estensione qui sotto)
+R1="${TRIM_DIR}/${SAMPLE}_1.trimmed.paired.fastq"
+R2="${TRIM_DIR}/${SAMPLE}_2.trimmed.paired.fastq"
+
+# Controlli
+[[ -f "$R1" && -f "$R2" ]] || { echo "[ERRORE] Mancano R1/R2: $R1 / $R2" >&2; exit 2; }
+[[ -f "$REF" ]] || { echo "[ERRORE] Manca REF: $REF" >&2; exit 2; }
+[[ -f "${REF}.fai" ]] || { echo "[ERRORE] Manca ${REF}.fai -> eseguire: samtools faidx $REF" >&2; exit 2; }
+[[ -f "${REF}.bwt" ]] || { echo "[ERRORE] Manca indice BWA (${REF}.bwt ecc.) -> eseguire: bwa index $REF" >&2; exit 2; }
+
+# Output
+OUT="${WORK_DIR}/${SAMPLE}_full"
+mkdir -p "$OUT"
+BAM_SORT="${OUT}/${SAMPLE}.sorted.bam"
+STATS="${OUT}/${SAMPLE}.sorted.stats.txt"
+IDXSTATS="${OUT}/${SAMPLE}.sorted.idxstats.txt"
+FLAGSTAT="${OUT}/${SAMPLE}.sorted.flagstat.txt"
+
+echo "[INFO] R1=$R1"
+echo "[INFO] R2=$R2"
+
+# Allineamento + sort
+bwa mem -t 20 "$REF" "$R1" "$R2" \
+  | samtools view -b -h -@ 20 \
+  | samtools sort -@ 20 -o "$BAM_SORT" -
+
+# Index e stats
+samtools index "$BAM_SORT"
+samtools stats "$BAM_SORT" > "$STATS"
+samtools idxstats "$BAM_SORT" > "$IDXSTATS"
+samtools flagstat "$BAM_SORT" > "$FLAGSTAT"
+
+echo "[FATTO] Allineamento completato per $SAMPLE"
