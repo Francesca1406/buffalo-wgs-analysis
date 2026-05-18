@@ -1,0 +1,60 @@
+TRIMMOMATIC
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 26
+#SBATCH --mem=200G
+#SBATCH --time=5:00:00
+#SBATCH --partition=g100_usr_prod
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name=trimmomatric_SWAMP_SRR
+#SBATCH -o TRIMMOMATIC_SWAMP_SRR.out
+#SBATCH -e TRIMMOMATIC_SWAMP_SRR.err
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=benctra@gmail.com
+
+module load profile/bioinf
+module load autoload fastqc/0.11.9
+module load autoload trimmomatic/0.39
+
+WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/swamp"
+INPUT_DIR="$WORK_DIR"
+TRIMMOMATIC_OUTPUT_DIR="$WORK_DIR/trimmomatic_output"
+FASTQC_POST_OUTPUT_DIR="$WORK_DIR/fastqc_post_trim"
+ADAPT_FA="$WORK_DIR/fastatihAdapters.fa"
+NCORES=22
+
+mkdir -p "$TRIMMOMATIC_OUTPUT_DIR"
+mkdir -p "$FASTQC_POST_OUTPUT_DIR"
+
+################# TRIMMOMATIC (FASTQ) #################
+echo "====== Trimmomatic on .fastq files ======"
+
+suffix="_1.fastq"
+
+for forward in "$INPUT_DIR/"*"$suffix"; do
+    reverse="${forward/_1/_2}"
+    base_string=$(basename "$forward" "$suffix")
+
+    fp="$TRIMMOMATIC_OUTPUT_DIR/${base_string}_1.trimmed.paired.fastq"
+    fu="$TRIMMOMATIC_OUTPUT_DIR/${base_string}_1.trimmed.unpaired.fastq"
+    rp="$TRIMMOMATIC_OUTPUT_DIR/${base_string}_2.trimmed.paired.fastq"
+    ru="$TRIMMOMATIC_OUTPUT_DIR/${base_string}_2.trimmed.unpaired.fastq"
+
+    java -jar $TRIMMOMATIC_HOME/bin/trimmomatic-0.39.jar PE -threads $NCORES -phred33 \
+        "$forward" "$reverse" \
+        "$fp" "$fu" "$rp" "$ru" \
+        ILLUMINACLIP:$ADAPT_FA:2:30:10 \
+        CROP:97 \
+        HEADCROP:10 \
+        SLIDINGWINDOW:4:30 \
+        TRAILING:3 \
+        MINLEN:36 \
+        AVGQUAL:25
+done
+
+################# POST-TRIM FASTQC #################
+echo "====== FastQC on trimmed paired reads ======"
+fastqc -t 8 -o "$FASTQC_POST_OUTPUT_DIR" "$TRIMMOMATIC_OUTPUT_DIR"/*_trimmed.paired.fastq
+
+
+
