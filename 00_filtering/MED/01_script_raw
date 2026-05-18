@@ -1,0 +1,40 @@
+File raw 
+#!/bin/bash
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=2
+#SBATCH --mem=2G
+#SBATCH --time=4:00:00
+#SBATCH --account=IscrC_MetaNet
+#SBATCH --job-name=scarica_1_med
+#SBATCH -p g100_all_serial
+#SBATCH -e SRA_batch.err
+#SBATCH -o SRA_batch.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=bencyfra@gmail.com
+
+module load profile/bioinf
+module load sra
+
+PATH_WORK_DIR="/g100_scratch/userexternal/fbencive/cartella_0/mediterranean"
+
+# elenco SRR da processare
+SRR_LIST=("SRR4477885" "SRR4477891" "SRR4477892" "SRR4477896" "SRR4477897")
+
+# ciclo per ogni accessione
+for INPUT_SRA in "${SRR_LIST[@]}"; do
+    echo ">>> PROCESSING: $INPUT_SRA"
+
+    # cartella di output per ogni SRR
+    PATH_SRA_DIR="$PATH_WORK_DIR/$INPUT_SRA"
+    mkdir -p "$PATH_SRA_DIR"
+
+    # scarica file .sra
+    prefetch -p --max-size 1000000000000 -v "$INPUT_SRA" -O "$PATH_WORK_DIR"
+
+    # estrae in fastq
+    fastq-dump --outdir "$PATH_WORK_DIR" --split-files "$PATH_SRA_DIR/$INPUT_SRA.sra"
+
+    echo ">>> DONE: $INPUT_SRA"
+done
+
+
